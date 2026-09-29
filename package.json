@@ -1,0 +1,21 @@
+{
+  "name": "runbpm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Génère une playlist dont le BPM suit la cadence de course cible, calculée à partir d'un parcours (avec dénivelé) et d'une allure désirée.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "samples": "node scripts/generate-samples.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2"
+  }
+}

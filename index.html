@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Playlist dont le tempo suit la cadence de course idéale sur votre parcours." />
+    <title>RunBPM</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏃</text></svg>" />
+  </head>
+  <body>
+    <header class="top">
+      <h1>RunBPM</h1>
+      <p class="tagline">Une playlist dont le tempo suit la cadence idéale, pas à pas, sur votre parcours.</p>
+    </header>
+
+    <main>
+      <section class="inputs">
+        <div class="card">
+          <h2><span class="step">1</span> Parcours</h2>
+          <label class="file">
+            <input type="file" id="route-file" accept=".gpx,.tcx,.json" />
+            <span>Charger un fichier GPX, TCX ou JSON</span>
+          </label>
+          <div class="row">
+            <button type="button" class="link" id="route-sample">Essayer la boucle vallonnée d’exemple</button>
+          </div>
+          <div id="route-summary" class="summary muted">Aucun parcours chargé.</div>
+        </div>
+
+        <div class="card">
+          <h2><span class="step">2</span> Course</h2>
+          <div class="grid2">
+            <label>Allure cible (min/km)
+              <input type="text" id="pace" value="5:30" inputmode="numeric" pattern="\d{1,2}:\d{2}" />
+            </label>
+            <label>Vitesse (km/h)
+              <input type="number" id="speed" value="10.9" min="4" max="25" step="0.1" />
+            </label>
+          </div>
+          <label>Stratégie
+            <select id="mode">
+              <option value="pace">Allure constante (même vitesse partout)</option>
+              <option value="effort">Effort constant (plus lent en montée, plus vite en descente)</option>
+            </select>
+          </label>
+          <label>Votre cadence sur le plat à cette allure (pas/min)
+            <input type="number" id="base-cadence" min="140" max="210" step="1" placeholder="auto" />
+          </label>
+          <details>
+            <summary>Réglages avancés</summary>
+            <div class="grid2">
+              <label>Montée : pas/min par % de pente
+                <input type="number" id="uphill" value="0.6" min="0" max="3" step="0.1" />
+              </label>
+              <label>Descente : pas/min par % de pente
+                <input type="number" id="downhill" value="0.3" min="0" max="3" step="0.1" />
+              </label>
+            </div>
+          </details>
+        </div>
+
+        <div class="card">
+          <h2><span class="step">3</span> Musique</h2>
+          <label class="file">
+            <input type="file" id="library-file" accept=".csv,.json,.tsv,.txt" multiple />
+            <span>Importer des morceaux (CSV ou JSON avec BPM et durée)</span>
+          </label>
+          <div class="row">
+            <button type="button" class="link" id="library-demo">Utiliser la bibliothèque de démo</button>
+            <button type="button" class="link danger" id="library-clear">Vider</button>
+          </div>
+          <div id="library-summary" class="summary muted">Aucun morceau.</div>
+          <details>
+            <summary>Options de sélection</summary>
+            <div class="grid2">
+              <label>Tolérance (±%)
+                <input type="number" id="tolerance" value="3" min="0.5" max="10" step="0.5" />
+              </label>
+              <label>Ajustement du tempo max (±%)
+                <input type="number" id="stretch" value="4" min="0" max="10" step="0.5" />
+              </label>
+            </div>
+            <label class="check"><input type="checkbox" id="half-time" checked /> Accepter les morceaux à mi-tempo (ex. 88 BPM → 176 pas/min)</label>
+            <label class="check"><input type="checkbox" id="repeat" /> Autoriser les répétitions</label>
+          </details>
+        </div>
+      </section>
+
+      <div id="messages" class="messages" aria-live="polite"></div>
+
+      <section id="results" class="results" hidden>
+        <div class="stats" id="stats"></div>
+        <div class="card">
+          <div class="card-head">
+            <h2>Profil, cadence et morceaux</h2>
+            <div class="legend">
+              <span><i class="sw elev"></i>Altitude</span>
+              <span><i class="sw cad"></i>Cadence cible</span>
+              <span><i class="sw ok"></i>Morceau dans la tolérance</span>
+              <span><i class="sw warn"></i>Hors tolérance</span>
+            </div>
+          </div>
+          <div id="chart" class="chart"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Playlist</h2>
+            <div class="row">
+              <button type="button" id="reroll">Autre proposition</button>
+              <button type="button" id="export-m3u">M3U</button>
+              <button type="button" id="export-csv">CSV</button>
+              <button type="button" id="export-json">JSON</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table id="playlist">
+              <thead>
+                <tr>
+                  <th>#</th><th>Début</th><th>Km</th><th>Morceau</th><th class="num">BPM</th>
+                  <th class="num">Lecture</th><th class="num">Pas/min</th><th class="num">Cible</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <details class="card">
+          <summary><h2 class="inline">Sections du parcours</h2></summary>
+          <div class="table-wrap">
+            <table id="sections">
+              <thead>
+                <tr>
+                  <th>Km</th><th class="num">Longueur</th><th class="num">Pente</th>
+                  <th class="num">Allure</th><th class="num">Cadence</th><th class="num">Passage</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </details>
+      </section>
+    </main>
+
+    <footer class="muted">
+      Tout est calculé dans votre navigateur : aucun fichier n’est envoyé sur un serveur.
+    </footer>
+    <script type="module" src="/src/ui/main.ts"></script>
+  </body>
+</html>

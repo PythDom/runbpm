@@ -1,0 +1,25 @@
+{
+  "name": "Profil simple (exemple JSON)",
+  "profile": [
+    {
+      "distance": 0,
+      "ele": 100
+    },
+    {
+      "distance": 2000,
+      "ele": 100
+    },
+    {
+      "distance": 3000,
+      "ele": 150
+    },
+    {
+      "distance": 4000,
+      "ele": 150
+    },
+    {
+      "distance": 5000,
+      "ele": 100
+    }
+  ]
+}

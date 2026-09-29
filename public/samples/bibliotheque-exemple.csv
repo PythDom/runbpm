@@ -1,0 +1,5 @@
+title,artist,bpm,duration,file
+Morceau exemple A,Artiste fictif,170,3:32,musique/morceau-a.mp3
+Morceau exemple B,Artiste fictif,176,4:05,musique/morceau-b.mp3
+Morceau exemple C (mi-tempo),Artiste fictif,88,3:48,musique/morceau-c.mp3
+Morceau exemple D,Autre artiste,182,3:15,musique/morceau-d.mp3
