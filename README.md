@@ -32,7 +32,23 @@ Dans l’application : cliquez sur « Essayer la boucle vallonnée d’exemple �
    - *Mi-tempo* : un morceau à 88 BPM convient pour 176 pas/min (un pas par demi-temps).
    - *Ajustement de tempo* : vitesse de lecture conseillée, ±4 % max par défaut (quasi inaudible).
    - Les morceaux naturellement au bon tempo sont préférés ; « Autre proposition » donne une variante.
-4. **Exports** : M3U (lecteurs audio), CSV, JSON (plan + playlist).
+4. **Lecteur intégré** (voir ci-dessous) et **exports** : M3U (lecteurs audio), CSV, JSON (plan + playlist).
+
+## Lecteur intégré
+
+- **Associer vos fichiers audio** (ou tout un dossier) : chaque fichier est relié à un morceau de la
+  bibliothèque par son nom : colonne `fichier` de la bibliothèque, sinon « Artiste - Titre », « Titre »…
+  (numéros de piste, accents et casse ignorés). Les fichiers restent sur votre appareil ; il faut les
+  resélectionner après un rechargement de la page.
+- **Ajustement du tempo** : chaque morceau est lu à la vitesse conseillée (`playbackRate`, ±4 % par défaut)
+  **sans changer la hauteur de la voix** (`preservesPitch`).
+- **Métronome** (Web Audio, clics planifiés sur l'horloge audio) :
+  - joue à la place des morceaux sans fichier associé (la bibliothèque de démo est donc jouable telle quelle) ;
+  - peut être superposé à la musique pour trouver le rythme (il n'est pas calé sur les temps du morceau).
+- Affichage en direct : cadence imposée, position estimée sur le parcours (km) et cadence cible à cet endroit.
+- Lecture depuis n'importe quel morceau (clic sur son numéro), barre d'espace = lecture/pause,
+  commandes de l'écran verrouillé et des écouteurs (Media Session).
+- Modifier l'allure, le parcours ou la bibliothèque recalcule la playlist et remet le lecteur au début.
 
 ## Formats d’entrée
 
@@ -72,14 +88,16 @@ src/core/     moteur, sans dépendance au DOM (testé)
   library.ts    import CSV/JSON des morceaux
   playlist.ts   sélection des morceaux
   export.ts     M3U / CSV / JSON
+  audioMatch.ts association fichiers audio ↔ morceaux
   demo.ts       bibliothèque fictive de démonstration
-src/ui/       interface (TypeScript sans framework) et graphique SVG
+src/ui/       interface (TypeScript sans framework), graphique SVG,
+              lecteur (player.ts) et métronome Web Audio (metronome.ts)
 tests/        tests vitest
 scripts/generate-samples.mjs   régénère les fichiers d’exemple
 ```
 
 ## Pistes d’évolution
-- Lecture intégrée des fichiers audio locaux avec ajustement du tempo (Web Audio, `playbackRate` + `preservesPitch`).
+- Caler le métronome superposé sur les temps réels du morceau (détection de la phase des battements).
 - Détection automatique du BPM des fichiers audio importés.
 - Connexion à un service de streaming (création de la playlist directement dans le compte).
 - Calibrage personnel de la cadence à partir d’une sortie enregistrée (fichier FIT/TCX avec cadence).

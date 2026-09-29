@@ -1,18 +1,30 @@
 import './style.css';
+import { AUDIO_EXTENSIONS, matchAudioFiles } from '../core/audioMatch';
 import { demoLibrary } from '../core/demo';
 import { toCsv, toJson, toM3U } from '../core/export';
 import { formatDuration, mergeLibraries, parseLibraryFile, type Song } from '../core/library';
-import { distanceAt, estimateCadence, planRun, type PacingMode } from '../core/pacing';
-import { generatePlaylist } from '../core/playlist';
+import { cadenceAt, distanceAt, estimateCadence, planRun, type PacingMode, type RunPlan } from '../core/pacing';
+import { generatePlaylist, type Playlist } from '../core/playlist';
 import { parseRouteFile, type Route } from '../core/route';
 import { elevationStats, smoothedProfile, splitSections } from '../core/sections';
 import { renderChart } from './chart';
+import { RunPlayer, type PlayerSnapshot, type PlayerTrack } from './player';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const LIBRARY_KEY = 'runbpm.library';
 
-const state: { route?: Route; library: Song[]; seed: number } = { library: loadLibrary(), seed: 1 };
+const state: {
+  route?: Route;
+  library: Song[];
+  seed: number;
+  /** Fichiers audio choisis par l'utilisateur (non mémorisés : à resélectionner après rechargement). */
+  audioFiles: File[];
+  /** Fichier audio associé à chaque morceau (par identifiant). */
+  audioBySong: Map<string, File>;
+  current?: { plan: RunPlan; playlist: Playlist };
+} = { library: loadLibrary(), seed: 1, audioFiles: [], audioBySong: new Map() };
 let lastExport: { m3u: string; csv: string; json: string } | undefined;
+let playerSignature = '';
 
 // ---------- Utilitaires ----------
 
@@ -164,6 +176,7 @@ $<HTMLInputElement>('library-file').addEventListener('change', async (ev) => {
   input.value = '';
   saveLibrary();
   renderLibrarySummary();
+  rematchAudio();
   update(errors, warnings);
 });
 
@@ -171,6 +184,7 @@ $('library-demo').addEventListener('click', () => {
   state.library = mergeLibraries(state.library, demoLibrary());
   saveLibrary();
   renderLibrarySummary();
+  rematchAudio();
   update();
 });
 
@@ -178,6 +192,7 @@ $('library-clear').addEventListener('click', () => {
   state.library = [];
   saveLibrary();
   renderLibrarySummary();
+  rematchAudio();
   update();
 });
 
@@ -203,6 +218,9 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   if (!state.route || state.library.length === 0 || !pace) {
     $('results').hidden = true;
     lastExport = undefined;
+    state.current = undefined;
+    loadPlayer([]);
+    renderAudioSummary();
     showMessages(errors, extraWarnings);
     return;
   }
@@ -228,6 +246,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
 
   showMessages(errors, [...extraWarnings, ...playlist.warnings]);
   $('results').hidden = false;
+  state.current = { plan, playlist };
 
   const cadences = plan.sections.map((s) => s.cadence);
   const { gain } = elevationStats(sections);
@@ -248,11 +267,14 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
     .map((e, i) => {
       const ok = e.error <= tolerance + 1e-9;
       const rate = e.playbackRate === 1 ? '—' : `${e.playbackRate > 1 ? '+' : ''}${((e.playbackRate - 1) * 100).toFixed(1)} %`;
-      return `<tr class="${ok ? '' : 'off'}">
-        <td>${i + 1}</td>
+      const audioTag = state.audioBySong.has(e.song.id)
+        ? ' <span class="tag audio" title="Fichier audio associé">♪ audio</span>'
+        : '';
+      return `<tr class="${ok ? '' : 'off'}" data-i="${i}">
+        <td><button type="button" class="row-play" data-i="${i}" aria-label="Lire le morceau ${i + 1}" title="Lire à partir d’ici">${i + 1}</button></td>
         <td>${formatDuration(e.startTime)}</td>
         <td>${km(distanceAt(plan, e.startTime), 1)}</td>
-        <td><div class="song-title">${esc(e.song.title)}${e.repeated ? ' <span class="tag">bis</span>' : ''}</div><div class="muted small">${esc(e.song.artist)}</div></td>
+        <td><div class="song-title">${esc(e.song.title)}${e.repeated ? ' <span class="tag">bis</span>' : ''}</div><div class="muted small">${esc(e.song.artist)}${audioTag}</div></td>
         <td class="num">${e.song.bpm}${e.multiplier === 2 ? ' <span class="tag" title="Un pas par demi-temps">×2</span>' : ''}</td>
         <td class="num">${rate}</td>
         <td class="num strong">${e.effectiveCadence}</td>
@@ -274,6 +296,10 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
     )
     .join('');
 
+  loadPlayer(playlist.entries.map((entry) => ({ entry, file: state.audioBySong.get(entry.song.id) })));
+  renderPlayer(player.snapshot());
+  renderAudioSummary();
+
   const title = `RunBPM – ${route.name} – ${formatPace(pace)}/km`;
   lastExport = {
     m3u: toM3U(playlist, title),
@@ -282,10 +308,134 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   };
 }
 
+// ---------- Lecteur ----------
+
+const player = new RunPlayer((snap) => renderPlayer(snap));
+const seekInput = $<HTMLInputElement>('p-seek');
+let seeking = false;
+
+/** Recharge le lecteur seulement si la playlist ou les fichiers associés ont changé. */
+function loadPlayer(tracks: PlayerTrack[]): void {
+  const signature = tracks
+    .map((t) => `${t.entry.song.id}@${t.entry.playbackRate}:${t.file ? `${t.file.name}/${t.file.size}` : ''}`)
+    .join('|');
+  if (signature === playerSignature) return;
+  playerSignature = signature;
+  player.load(tracks);
+}
+
+function rematchAudio(): void {
+  const matches = matchAudioFiles(
+    state.library,
+    state.audioFiles.map((f) => f.webkitRelativePath || f.name),
+  );
+  state.audioBySong = new Map([...matches].map(([id, i]) => [id, state.audioFiles[i]]));
+}
+
+function renderAudioSummary(): void {
+  const el = $('player-assoc');
+  if (state.audioFiles.length === 0) {
+    el.textContent = 'Aucun fichier audio : le métronome donne la cadence.';
+    return;
+  }
+  const inPlaylist = state.current?.playlist.entries.filter((e) => state.audioBySong.has(e.song.id)).length ?? 0;
+  const total = state.current?.playlist.entries.length ?? 0;
+  const unmatched = state.audioFiles.length - state.audioBySong.size;
+  el.textContent =
+    `${state.audioBySong.size} fichier(s) associé(s) à la bibliothèque` +
+    (total ? ` · ${inPlaylist}/${total} morceaux de la playlist` : '') +
+    (unmatched ? ` · ${unmatched} sans correspondance` : '');
+}
+
+function addAudioFiles(list: FileList | null): void {
+  const files = Array.from(list ?? []).filter((f) => f.type.startsWith('audio/') || AUDIO_EXTENSIONS.test(f.name));
+  const key = (f: File) => `${f.webkitRelativePath || f.name}/${f.size}`;
+  const known = new Set(state.audioFiles.map(key));
+  state.audioFiles = [...state.audioFiles, ...files.filter((f) => !known.has(key(f)))];
+  rematchAudio();
+  update();
+}
+
+for (const id of ['audio-files', 'audio-folder']) {
+  $<HTMLInputElement>(id).addEventListener('change', (ev) => {
+    const input = ev.target as HTMLInputElement;
+    addAudioFiles(input.files);
+    input.value = '';
+  });
+}
+
+function renderPlayer(snap: PlayerSnapshot): void {
+  $('p-play').classList.toggle('playing', snap.playing);
+  $('p-play').setAttribute('aria-label', snap.playing ? 'Pause' : 'Lecture');
+  const entry = state.current?.playlist.entries[snap.index];
+  const plan = state.current?.plan;
+
+  if (!entry || !plan) {
+    $('p-title').textContent = '—';
+    $('p-sub').innerHTML = '&nbsp;';
+    $('p-cad').textContent = '—';
+  } else {
+    $('p-title').textContent = `${snap.index + 1}. ${entry.song.title}`;
+    const source =
+      snap.mode === 'audio' ? 'fichier audio' : snap.mode === 'metronome' ? 'métronome (pas de fichier)' : 'ignoré (pas de fichier)';
+    const rate = entry.playbackRate === 1 ? 'tempo original' : `tempo ${entry.playbackRate > 1 ? '+' : ''}${((entry.playbackRate - 1) * 100).toFixed(1)} %`;
+    $('p-sub').textContent = `${entry.song.artist} · ${entry.song.bpm} BPM${entry.multiplier === 2 ? ' ×2' : ''} · ${rate} · ${source}`;
+    $('p-cad').textContent = String(Math.round(entry.effectiveCadence));
+    const runTime = entry.startTime + snap.position;
+    const done = runTime >= plan.totalTime;
+    $('p-run').textContent = done
+      ? 'Arrivée !'
+      : `km ${km(distanceAt(plan, runTime), 1)} · cible ${cadenceAt(plan, runTime)} pas/min`;
+  }
+  $('p-pos').textContent = formatDuration(snap.position);
+  $('p-dur').textContent = formatDuration(snap.duration);
+  if (!seeking) seekInput.value = String(snap.duration > 0 ? Math.round((snap.position / snap.duration) * 1000) : 0);
+
+  const err = $('p-error');
+  err.hidden = !snap.error;
+  err.textContent = snap.error ?? '';
+
+  for (const row of $('playlist').querySelectorAll<HTMLTableRowElement>('tbody tr')) {
+    row.classList.toggle('current', Number(row.dataset.i) === snap.index && (snap.playing || snap.position > 0));
+  }
+}
+
+$('p-play').addEventListener('click', () => player.toggle());
+$('p-next').addEventListener('click', () => player.next());
+$('p-prev').addEventListener('click', () => player.previous());
+seekInput.addEventListener('input', () => (seeking = true));
+seekInput.addEventListener('change', () => {
+  seeking = false;
+  player.seek(Number(seekInput.value) / 1000);
+});
+$('playlist').addEventListener('click', (ev) => {
+  const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button.row-play');
+  if (btn) player.jump(Number(btn.dataset.i));
+});
+
+function syncPlayerOptions(): void {
+  player.setOptions({
+    metronomeFallback: $<HTMLInputElement>('m-fallback').checked,
+    metronomeOverlay: $<HTMLInputElement>('m-overlay').checked,
+    metronomeVolume: Number($<HTMLInputElement>('m-volume').value) / 100,
+  });
+}
+for (const id of ['m-fallback', 'm-overlay', 'm-volume']) $(id).addEventListener('input', syncPlayerOptions);
+syncPlayerOptions();
+
+// Barre d'espace = lecture / pause (hors champs de saisie).
+document.addEventListener('keydown', (ev) => {
+  const target = ev.target as HTMLElement;
+  if (ev.code !== 'Space' || $('results').hidden || target.closest('input, select, textarea, button')) return;
+  ev.preventDefault();
+  player.toggle();
+});
+
 const base = () => `runbpm-${slug(state.route?.name ?? 'parcours')}`;
 $('export-m3u').addEventListener('click', () => lastExport && download(`${base()}.m3u`, lastExport.m3u, 'audio/x-mpegurl'));
 $('export-csv').addEventListener('click', () => lastExport && download(`${base()}.csv`, lastExport.csv, 'text/csv'));
 $('export-json').addEventListener('click', () => lastExport && download(`${base()}.json`, lastExport.json, 'application/json'));
 
 renderLibrarySummary();
+rematchAudio();
 update();

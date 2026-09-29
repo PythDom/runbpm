@@ -510,3 +510,166 @@ footer {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- Lecteur ---------- */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+label.file.compact {
+  flex: 1 1 200px;
+  padding: 10px;
+  font-size: 0.9rem;
+}
+
+.now {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 16px;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+button.icon {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+button.icon svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+button.icon.primary {
+  width: 52px;
+  height: 52px;
+  border: 0;
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+button.icon.primary svg {
+  width: 22px;
+  height: 22px;
+}
+
+.i-pause,
+.playing .i-play {
+  display: none;
+}
+
+.playing .i-pause {
+  display: block;
+}
+
+.now-info {
+  min-width: 0;
+}
+
+.now-info .song-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#p-seek {
+  width: 100%;
+  margin: 6px 0 0;
+  accent-color: var(--accent);
+}
+
+.times {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.now-cad {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 84px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.now-cad .label,
+.now-cad .unit {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.now-cad .value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--cad);
+  font-variant-numeric: tabular-nums;
+}
+
+.player-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin-top: 8px;
+}
+
+label.volume {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+label.volume input {
+  accent-color: var(--accent);
+}
+
+button.row-play {
+  min-width: 30px;
+  padding: 2px 6px;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+tr.current td {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+tr.current button.row-play {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.tag.audio {
+  background: color-mix(in srgb, var(--ok) 20%, transparent);
+  color: var(--text);
+}
+
+@media (max-width: 560px) {
+  .now {
+    grid-template-columns: 1fr auto;
+  }
+  .now-info {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+}

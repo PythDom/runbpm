@@ -90,6 +90,54 @@
 
       <section id="results" class="results" hidden>
         <div class="stats" id="stats"></div>
+
+        <div class="card player">
+          <div class="card-head">
+            <h2>Lecteur</h2>
+            <span id="player-assoc" class="muted small"></span>
+          </div>
+          <div class="row">
+            <label class="file compact">
+              <input type="file" id="audio-files" accept="audio/*,.mp3,.m4a,.ogg,.opus,.flac,.wav" multiple />
+              <span>Associer vos fichiers audio</span>
+            </label>
+            <label class="file compact">
+              <input type="file" id="audio-folder" webkitdirectory multiple />
+              <span>… ou tout un dossier</span>
+            </label>
+          </div>
+          <div class="now">
+            <div class="controls">
+              <button type="button" id="p-prev" class="icon" aria-label="Morceau précédent" title="Précédent">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>
+              </button>
+              <button type="button" id="p-play" class="icon primary" aria-label="Lecture" title="Lecture / pause">
+                <svg viewBox="0 0 24 24" aria-hidden="true" class="i-play"><path d="M7 4v16l13-8z"/></svg>
+                <svg viewBox="0 0 24 24" aria-hidden="true" class="i-pause"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
+              </button>
+              <button type="button" id="p-next" class="icon" aria-label="Morceau suivant" title="Suivant">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>
+              </button>
+            </div>
+            <div class="now-info">
+              <div id="p-title" class="song-title">—</div>
+              <div id="p-sub" class="muted small">&nbsp;</div>
+              <input type="range" id="p-seek" min="0" max="1000" value="0" aria-label="Position dans le morceau" />
+              <div class="times muted small"><span id="p-pos">0:00</span><span id="p-run"></span><span id="p-dur">0:00</span></div>
+            </div>
+            <div class="now-cad">
+              <span class="label">Cadence</span>
+              <span id="p-cad" class="value">—</span>
+              <span class="unit">pas/min</span>
+            </div>
+          </div>
+          <div class="player-options">
+            <label class="check"><input type="checkbox" id="m-fallback" checked /> Métronome à la place des morceaux sans fichier</label>
+            <label class="check"><input type="checkbox" id="m-overlay" /> Superposer le métronome à la musique</label>
+            <label class="volume">Volume du métronome <input type="range" id="m-volume" min="0" max="100" value="50" /></label>
+          </div>
+          <p id="p-error" class="msg error" hidden></p>
+        </div>
         <div class="card">
           <div class="card-head">
             <h2>Profil, cadence et morceaux</h2>
@@ -117,7 +165,7 @@
             <table id="playlist">
               <thead>
                 <tr>
-                  <th>#</th><th>Début</th><th>Km</th><th>Morceau</th><th class="num">BPM</th>
+                  <th><span class="sr-only">Lire</span>#</th><th>Début</th><th>Km</th><th>Morceau</th><th class="num">BPM</th>
                   <th class="num">Lecture</th><th class="num">Pas/min</th><th class="num">Cible</th>
                 </tr>
               </thead>
