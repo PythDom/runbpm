@@ -9,6 +9,7 @@ import { parseRouteFile, type Route } from '../core/route';
 import { elevationStats, smoothedProfile, splitSections } from '../core/sections';
 import { renderChart } from './chart';
 import { RunPlayer, type PlayerSnapshot, type PlayerTrack } from './player';
+import { SpotifyPanel } from './spotifyPanel';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const LIBRARY_KEY = 'runbpm.library';
@@ -25,6 +26,15 @@ const state: {
 } = { library: loadLibrary(), seed: 1, audioFiles: [], audioBySong: new Map() };
 let lastExport: { m3u: string; csv: string; json: string } | undefined;
 let playerSignature = '';
+
+/** Réglages du formulaire conservés pendant l'aller-retour de connexion à Spotify. */
+const SETTINGS_IDS = ['pace', 'speed', 'mode', 'base-cadence', 'uphill', 'downhill', 'tolerance', 'stretch', 'half-time', 'repeat', 'm-fallback', 'm-overlay', 'm-volume'];
+const PENDING_KEY = 'runbpm.pending';
+
+/** Morceau lu via Spotify : pas de fichier local, identifiant Spotify connu, compte connecté. */
+function playsOnSpotify(song: Song): boolean {
+  return spotify.connected && !!song.spotifyUri && !state.audioBySong.has(song.id);
+}
 
 // ---------- Utilitaires ----------
 
@@ -84,7 +94,7 @@ function slug(s: string): string {
   return (
     s
       .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
+      .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '') || 'parcours'
@@ -242,6 +252,8 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
     allowHalfTime: $<HTMLInputElement>('half-time').checked,
     allowRepeat: $<HTMLInputElement>('repeat').checked,
     seed: state.seed,
+    // Spotify ne permet pas de changer la vitesse de lecture.
+    canStretch: (song) => !playsOnSpotify(song),
   });
 
   showMessages(errors, [...extraWarnings, ...playlist.warnings]);
@@ -269,7 +281,9 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
       const rate = e.playbackRate === 1 ? '—' : `${e.playbackRate > 1 ? '+' : ''}${((e.playbackRate - 1) * 100).toFixed(1)} %`;
       const audioTag = state.audioBySong.has(e.song.id)
         ? ' <span class="tag audio" title="Fichier audio associé">♪ audio</span>'
-        : '';
+        : playsOnSpotify(e.song)
+          ? ' <span class="tag spotify" title="Lu via Spotify (tempo original)">Spotify</span>'
+          : '';
       return `<tr class="${ok ? '' : 'off'}" data-i="${i}">
         <td><button type="button" class="row-play" data-i="${i}" aria-label="Lire le morceau ${i + 1}" title="Lire à partir d’ici">${i + 1}</button></td>
         <td>${formatDuration(e.startTime)}</td>
@@ -296,7 +310,14 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
     )
     .join('');
 
-  loadPlayer(playlist.entries.map((entry) => ({ entry, file: state.audioBySong.get(entry.song.id) })));
+  loadPlayer(
+    playlist.entries.map((entry) => ({
+      entry,
+      file: state.audioBySong.get(entry.song.id),
+      spotifyUri: playsOnSpotify(entry.song) ? entry.song.spotifyUri : undefined,
+    })),
+  );
+  $('export-spotify').hidden = !spotify.connected;
   renderPlayer(player.snapshot());
   renderAudioSummary();
 
@@ -317,7 +338,7 @@ let seeking = false;
 /** Recharge le lecteur seulement si la playlist ou les fichiers associés ont changé. */
 function loadPlayer(tracks: PlayerTrack[]): void {
   const signature = tracks
-    .map((t) => `${t.entry.song.id}@${t.entry.playbackRate}:${t.file ? `${t.file.name}/${t.file.size}` : ''}`)
+    .map((t) => `${t.entry.song.id}@${t.entry.playbackRate}:${t.file ? `${t.file.name}/${t.file.size}` : ''}:${t.spotifyUri ?? ''}`)
     .join('|');
   if (signature === playerSignature) return;
   playerSignature = signature;
@@ -335,7 +356,9 @@ function rematchAudio(): void {
 function renderAudioSummary(): void {
   const el = $('player-assoc');
   if (state.audioFiles.length === 0) {
-    el.textContent = 'Aucun fichier audio : le métronome donne la cadence.';
+    el.textContent = spotify.connected
+      ? 'Aucun fichier audio : morceaux liés lus via Spotify, les autres au métronome.'
+      : 'Aucun fichier audio : le métronome donne la cadence.';
     return;
   }
   const inPlaylist = state.current?.playlist.entries.filter((e) => state.audioBySong.has(e.song.id)).length ?? 0;
@@ -377,7 +400,13 @@ function renderPlayer(snap: PlayerSnapshot): void {
   } else {
     $('p-title').textContent = `${snap.index + 1}. ${entry.song.title}`;
     const source =
-      snap.mode === 'audio' ? 'fichier audio' : snap.mode === 'metronome' ? 'métronome (pas de fichier)' : 'ignoré (pas de fichier)';
+      snap.mode === 'audio'
+        ? 'fichier audio'
+        : snap.mode === 'spotify'
+          ? 'Spotify'
+          : snap.mode === 'metronome'
+            ? 'métronome (pas de fichier)'
+            : 'ignoré (pas de fichier)';
     const rate = entry.playbackRate === 1 ? 'tempo original' : `tempo ${entry.playbackRate > 1 ? '+' : ''}${((entry.playbackRate - 1) * 100).toFixed(1)} %`;
     $('p-sub').textContent = `${entry.song.artist} · ${entry.song.bpm} BPM${entry.multiplier === 2 ? ' ×2' : ''} · ${rate} · ${source}`;
     $('p-cad').textContent = String(Math.round(entry.effectiveCadence));
@@ -436,6 +465,82 @@ $('export-m3u').addEventListener('click', () => lastExport && download(`${base()
 $('export-csv').addEventListener('click', () => lastExport && download(`${base()}.csv`, lastExport.csv, 'text/csv'));
 $('export-json').addEventListener('click', () => lastExport && download(`${base()}.json`, lastExport.json, 'application/json'));
 
+// ---------- Spotify ----------
+
+const spotify = new SpotifyPanel($('spotify-card'), {
+  onConnectionChange: () => {
+    player.setRemote(spotify.remote);
+    update();
+  },
+  getLibrary: () => state.library,
+  onLibraryChanged: () => {
+    saveLibrary();
+    update();
+  },
+  beforeRedirect: () => {
+    // La connexion quitte la page : on garde le parcours et les réglages pour le retour.
+    try {
+      const settings = Object.fromEntries(
+        SETTINGS_IDS.map((id) => {
+          const el = $<HTMLInputElement>(id);
+          return [id, el.type === 'checkbox' ? el.checked : el.value];
+        }),
+      );
+      sessionStorage.setItem(PENDING_KEY, JSON.stringify({ route: state.route, settings }));
+    } catch {
+      /* stockage indisponible : il faudra recharger le parcours */
+    }
+  },
+});
+
+function restorePending(): void {
+  try {
+    const raw = sessionStorage.getItem(PENDING_KEY);
+    sessionStorage.removeItem(PENDING_KEY);
+    if (!raw) return;
+    const { route, settings } = JSON.parse(raw) as { route?: Route; settings?: Record<string, string | boolean> };
+    for (const [id, value] of Object.entries(settings ?? {})) {
+      const el = document.getElementById(id) as HTMLInputElement | null;
+      if (!el) continue;
+      if (el.type === 'checkbox') el.checked = value === true;
+      else el.value = String(value);
+    }
+    syncPlayerOptions();
+    if (route?.points?.length) setRoute(route);
+  } catch {
+    /* rien à restaurer */
+  }
+}
+
+$('export-spotify').addEventListener('click', async () => {
+  const status = $('spotify-export-status');
+  const current = state.current;
+  const pace = parsePace(paceInput.value);
+  if (!current || !state.route || !pace) return;
+  const btn = $<HTMLButtonElement>('export-spotify');
+  btn.disabled = true;
+  status.hidden = false;
+  status.className = 'small muted';
+  status.textContent = 'Création de la playlist…';
+  try {
+    const name = `RunBPM – ${state.route.name} – ${formatPace(pace)}/km`;
+    const description = `Cadence ${current.plan.baseCadence} pas/min environ, générée par RunBPM.`;
+    const res = await spotify.exportPlaylist(current.playlist, name, description);
+    status.className = 'small';
+    status.innerHTML =
+      `Playlist créée avec ${res.added} morceau(x) : <a href="${esc(res.url)}" target="_blank" rel="noopener">ouvrir dans Spotify</a>.` +
+      (res.missing ? ` ${res.missing} morceau(x) non liés à Spotify n’y figurent pas.` : '') +
+      ' Dans l’application Spotify, les morceaux sont joués au tempo original.';
+  } catch (e) {
+    status.className = 'small error-text';
+    status.textContent = (e as Error).message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 renderLibrarySummary();
 rematchAudio();
+restorePending();
 update();
+void spotify.init();

@@ -5,9 +5,9 @@
   "description": "Génère une playlist dont le BPM suit la cadence de course cible, calculée à partir d'un parcours (avec dénivelé) et d'une allure désirée.",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
+    "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "samples": "node scripts/generate-samples.mjs"

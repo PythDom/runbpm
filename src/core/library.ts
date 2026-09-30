@@ -15,6 +15,8 @@ export interface Song {
   duration: number;
   /** Chemin ou URL du fichier audio, repris dans l'export M3U. */
   file?: string;
+  /** Identifiant Spotify du morceau (spotify:track:…), pour la lecture via Spotify. */
+  spotifyUri?: string;
 }
 
 export interface LibraryImport {
@@ -23,6 +25,7 @@ export interface LibraryImport {
 }
 
 const COLUMN_ALIASES: Record<keyof Omit<Song, 'id'>, string[]> = {
+  spotifyUri: ['spotify', 'spotify uri', 'spotify_uri', 'spotify id', 'spotify url', 'track uri', 'uri'],
   title: ['title', 'titre', 'track name', 'track', 'name', 'nom', 'song', 'chanson', 'morceau'],
   artist: ['artist', 'artiste', 'artist name(s)', 'artist name', 'artists', 'artistes', 'interprete', 'interprète'],
   bpm: ['bpm', 'tempo'],
@@ -105,6 +108,20 @@ export function parseDuration(value: string, headerHint = ''): number | undefine
 }
 
 let idCounter = 0;
+/**
+ * Normalise un identifiant Spotify : « spotify:track:ID », lien open.spotify.com/track/ID
+ * (avec ou sans préfixe de langue) ou ID seul (22 caractères base 62).
+ */
+export function normalizeSpotifyUri(value: string | undefined): string | undefined {
+  const v = value?.trim();
+  if (!v) return undefined;
+  const m =
+    /^spotify:track:([A-Za-z0-9]{22})$/.exec(v) ??
+    /^https?:\/\/open\.spotify\.com\/(?:intl-[a-z-]+\/)?track\/([A-Za-z0-9]{22})(?:[/?#].*)?$/.exec(v) ??
+    /^([A-Za-z0-9]{22})$/.exec(v);
+  return m ? `spotify:track:${m[1]}` : undefined;
+}
+
 function newId(): string {
   idCounter += 1;
   return `s${Date.now().toString(36)}${idCounter}`;
@@ -120,13 +137,16 @@ function validate(partial: Partial<Song>, line: number, warnings: string[]): Son
     warnings.push(`${where} : durée manquante ou invalide, morceau ignoré.`);
     return undefined;
   }
+  // Un lien Spotify placé dans la colonne « fichier » est reconnu comme tel.
+  const fileAsSpotify = normalizeSpotifyUri(partial.file);
   return {
     id: newId(),
     title: partial.title?.trim() || 'Sans titre',
     artist: partial.artist?.trim() || 'Artiste inconnu',
     bpm: Math.round(partial.bpm * 10) / 10,
     duration: Math.round(partial.duration),
-    file: partial.file?.trim() || undefined,
+    file: fileAsSpotify ? undefined : partial.file?.trim() || undefined,
+    spotifyUri: normalizeSpotifyUri(partial.spotifyUri) ?? fileAsSpotify,
   };
 }
 
@@ -140,6 +160,7 @@ export function parseLibraryCsv(text: string): LibraryImport {
     bpm: findColumn(headers, 'bpm'),
     duration: findColumn(headers, 'duration'),
     file: findColumn(headers, 'file'),
+    spotifyUri: findColumn(headers, 'spotifyUri'),
   };
   if (cols.bpm < 0) throw new Error('Colonne BPM introuvable (attendu : "bpm" ou "tempo").');
   if (cols.duration < 0) throw new Error('Colonne durée introuvable (attendu : "duration", "durée", "duration (ms)"…).');
@@ -154,6 +175,7 @@ export function parseLibraryCsv(text: string): LibraryImport {
         bpm: parseNumber(get(cols.bpm)),
         duration: parseDuration(get(cols.duration), headers[cols.duration]),
         file: get(cols.file),
+        spotifyUri: get(cols.spotifyUri),
       },
       k + 2,
       warnings,
@@ -200,6 +222,7 @@ export function parseLibraryJson(text: string): LibraryImport {
           durationKey ?? '',
         ),
         file: str('file', 'path', 'url'),
+        spotifyUri: str('spotifyUri', 'spotify_uri', 'spotify', 'uri'),
       },
       k + 1,
       warnings,

@@ -111,7 +111,7 @@ h2.inline {
 
 .inputs {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 16px;
   margin: 20px 0;
 }
@@ -672,4 +672,73 @@ tr.current button.row-play {
     grid-column: 1 / -1;
     grid-row: 1;
   }
+}
+
+/* ---------- Spotify ---------- */
+
+.error-text {
+  color: var(--error-text);
+}
+
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+ol.steps {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  color: var(--muted);
+}
+
+ol.steps li {
+  margin-bottom: 6px;
+}
+
+ol.steps a,
+.summary a,
+#spotify-export-status a {
+  color: var(--accent);
+}
+
+.copy-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.copy-row code {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  word-break: break-all;
+}
+
+.copy-row select {
+  flex: 1 1 180px;
+  width: auto;
+  margin-top: 0;
+}
+
+progress {
+  flex: 1 1 120px;
+  accent-color: var(--accent);
+}
+
+.tag.spotify {
+  background: color-mix(in srgb, #1db954 22%, transparent);
+  color: var(--text);
+}
+
+#spotify-export-status {
+  margin: 0 0 8px;
 }

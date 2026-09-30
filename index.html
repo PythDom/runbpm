@@ -84,6 +84,8 @@
             <label class="check"><input type="checkbox" id="repeat" /> Autoriser les répétitions</label>
           </details>
         </div>
+
+        <div class="card" id="spotify-card"></div>
       </section>
 
       <div id="messages" class="messages" aria-live="polite"></div>
@@ -159,8 +161,10 @@
               <button type="button" id="export-m3u">M3U</button>
               <button type="button" id="export-csv">CSV</button>
               <button type="button" id="export-json">JSON</button>
+              <button type="button" id="export-spotify" hidden>Créer dans Spotify</button>
             </div>
           </div>
+          <p id="spotify-export-status" class="small" hidden></p>
           <div class="table-wrap">
             <table id="playlist">
               <thead>

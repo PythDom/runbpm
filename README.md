@@ -10,7 +10,7 @@ Application web 100 % locale : tout est calculé dans le navigateur, aucun fichi
 
 ```bash
 npm install
-npm run dev      # http://localhost:5173
+npm run dev      # http://127.0.0.1:5173 (Spotify refuse « localhost »)
 npm test         # tests unitaires (vitest)
 npm run build    # version statique dans dist/ (déployable telle quelle, ex. GitHub Pages)
 ```
@@ -50,6 +50,39 @@ Dans l’application : cliquez sur « Essayer la boucle vallonnée d’exemple �
   commandes de l'écran verrouillé et des écouteurs (Media Session).
 - Modifier l'allure, le parcours ou la bibliothèque recalcule la playlist et remet le lecteur au début.
 
+## Spotify (optionnel)
+
+Les morceaux de la bibliothèque peuvent être lus depuis un compte **Spotify Premium**, soit dans
+le navigateur (Web Playback SDK), soit sur un autre appareil via Spotify Connect (typiquement :
+l'application Spotify du téléphone pendant la course, RunBPM servant de télécommande).
+
+**Configuration (une fois)** : RunBPM est une page statique sans serveur, chaque utilisateur utilise
+donc sa propre application Spotify :
+1. créer une application sur [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
+   (Web API + Web Playback SDK) ;
+2. y déclarer l'adresse de redirection affichée dans la carte « Spotify » (l'adresse de la page ;
+   en local `http://127.0.0.1:5173/`, Spotify refusant `localhost`) ;
+3. dans *User Management*, ajouter les comptes autorisés (5 maximum en mode développement) ;
+4. coller le *Client ID* dans RunBPM et se connecter (OAuth PKCE : aucun secret).
+
+**Fonctionnement**
+- Un morceau est lu via Spotify s'il a un identifiant Spotify (colonne `spotify`, `track uri`, `uri`,
+  ou un lien `open.spotify.com/track/…`) et **aucun fichier local** (le fichier local reste prioritaire).
+- « Lier la bibliothèque à Spotify » recherche les morceaux sans identifiant et ne retient que les
+  correspondances sûres (titre, artiste et durée).
+- **Pas d'ajustement de tempo** : Spotify ne permet pas de modifier la vitesse de lecture. La playlist
+  ne retient donc pour ces morceaux que ceux dont le BPM correspond déjà à la cadence.
+- « Créer dans Spotify » enregistre la playlist (privée) dans le compte, pour courir avec la seule
+  application Spotify.
+
+**Limites imposées par Spotify (2026)** : Premium obligatoire, 5 utilisateurs par application en mode
+développement, tempo des morceaux (audio-features) non fourni par l'API : le BPM doit venir de votre
+bibliothèque. Le lecteur intégré au navigateur n'est pas disponible partout (lecture en arrière-plan
+impossible sur iOS) : sur téléphone, préférez la lecture sur l'application Spotify.
+
+**Deezer** n'est pas pris en charge : Deezer n'accepte plus la création d'applications développeur et
+son SDK de lecture est abandonné ; aucune lecture complète n'est possible depuis une application tierce.
+
 ## Formats d’entrée
 
 ### Parcours
@@ -73,6 +106,7 @@ CSV (séparateur `,` `;` ou tabulation) ou JSON. Colonnes reconnues (FR/EN) :
 | Titre | `title`, `titre`, `track name`, `name`… | non |
 | Artiste | `artist`, `artiste`, `artist name(s)`… | non |
 | Fichier | `file`, `fichier`, `path`, `url` (repris dans le M3U) | non |
+| Spotify | `spotify`, `track uri`, `uri` : `spotify:track:…`, lien `open.spotify.com/track/…` ou ID | non |
 
 Les exports de playlists au format *Exportify* (colonnes `Track Name`, `Artist Name(s)`, `Duration (ms)`, `Tempo`)
 sont reconnus directement. Exemple : [`public/samples/bibliotheque-exemple.csv`](public/samples/bibliotheque-exemple.csv).
@@ -89,9 +123,11 @@ src/core/     moteur, sans dépendance au DOM (testé)
   playlist.ts   sélection des morceaux
   export.ts     M3U / CSV / JSON
   audioMatch.ts association fichiers audio ↔ morceaux
+  spotifyMatch.ts choix du bon résultat de recherche Spotify
+src/services/spotify.ts   connexion OAuth PKCE, Web API, Web Playback SDK
   demo.ts       bibliothèque fictive de démonstration
 src/ui/       interface (TypeScript sans framework), graphique SVG,
-              lecteur (player.ts) et métronome Web Audio (metronome.ts)
+              lecteur (player.ts), métronome Web Audio (metronome.ts), carte Spotify (spotifyPanel.ts)
 tests/        tests vitest
 scripts/generate-samples.mjs   régénère les fichiers d’exemple
 ```

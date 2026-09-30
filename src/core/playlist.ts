@@ -24,6 +24,12 @@ export interface PlaylistOptions {
   allowRepeat: boolean;
   /** Graine pour varier les propositions à qualité équivalente. */
   seed: number;
+  /**
+   * Indique si la vitesse de lecture d'un morceau peut être ajustée. Faux pour les morceaux lus
+   * via un service de streaming (Spotify ne permet pas de changer le tempo) : seuls les morceaux
+   * naturellement au bon tempo conviennent alors.
+   */
+  canStretch?: (song: Song) => boolean;
 }
 
 export const DEFAULT_PLAYLIST_OPTIONS: PlaylistOptions = {
@@ -91,7 +97,8 @@ function evaluate(
   const natural = song.bpm * multiplier;
   // Premier passage : cadence moyenne sur la durée naturelle du morceau.
   const avg = averageOver(plan, t, t + song.duration, (c) => c);
-  const rate = opts.maxStretch > 0 ? Math.min(1 + opts.maxStretch, Math.max(1 - opts.maxStretch, avg / natural)) : 1;
+  const maxStretch = opts.canStretch && !opts.canStretch(song) ? 0 : opts.maxStretch;
+  const rate = maxStretch > 0 ? Math.min(1 + maxStretch, Math.max(1 - maxStretch, avg / natural)) : 1;
   const duration = song.duration / rate;
   const effective = natural * rate;
   const error = averageOver(plan, t, t + duration, (c) => Math.abs(effective - c) / c);
