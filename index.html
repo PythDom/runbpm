@@ -62,11 +62,26 @@
         <div class="card">
           <h2><span class="step">3</span> Musique</h2>
           <label class="file">
-            <input type="file" id="library-file" accept=".csv,.json,.tsv,.txt" multiple />
-            <span>Importer des morceaux (CSV ou JSON avec BPM et durée)</span>
+            <input type="file" id="audio-folder" webkitdirectory multiple />
+            <span>Analyser un dossier de musique</span>
           </label>
           <div class="row">
-            <button type="button" class="link" id="library-demo">Utiliser la bibliothèque de démo</button>
+            <label class="file compact">
+              <input type="file" id="audio-files" accept="audio/*,.mp3,.m4a,.ogg,.opus,.flac,.wav" multiple />
+              <span>… ou des fichiers</span>
+            </label>
+            <label class="file compact">
+              <input type="file" id="library-file" accept=".csv,.json,.tsv,.txt" multiple />
+              <span>… ou un CSV/JSON</span>
+            </label>
+          </div>
+          <label class="check"><input type="checkbox" id="use-tag-bpm" checked /> Utiliser le BPM déjà présent dans les tags (plus rapide)</label>
+          <div id="analysis" class="analysis" hidden>
+            <div class="row"><progress id="analysis-bar" max="1" value="0"></progress><button type="button" id="analysis-stop">Arrêter</button></div>
+            <p id="analysis-text" class="small muted"></p>
+          </div>
+          <div class="row">
+            <button type="button" class="link" id="library-demo">Bibliothèque de démo</button>
             <button type="button" class="link danger" id="library-clear">Vider</button>
           </div>
           <div id="library-summary" class="summary muted">Aucun morceau.</div>
@@ -76,7 +91,7 @@
               <label>Tolérance (±%)
                 <input type="number" id="tolerance" value="3" min="0.5" max="10" step="0.5" />
               </label>
-              <label>Ajustement du tempo max (±%)
+              <label id="stretch-row" title="Accélération ou ralentissement maximal des morceaux (hauteur de voix préservée)">Tempo ajustable (±%)
                 <input type="number" id="stretch" value="4" min="0" max="10" step="0.5" />
               </label>
             </div>
@@ -84,12 +99,77 @@
             <label class="check"><input type="checkbox" id="repeat" /> Autoriser les répétitions</label>
           </details>
         </div>
+
+        <div class="card">
+          <h2><span class="step">4</span> Streaming</h2>
+          <label>Playlist à créer sur
+            <select id="service">
+              <option value="navidrome">Navidrome / Subsonic (lecture dans RunBPM)</option>
+              <option value="spotify">Spotify</option>
+              <option value="deezer">Deezer</option>
+              <option value="none">Aucun service (fichiers locaux, M3U)</option>
+            </select>
+          </label>
+          <div id="navidrome-panel"></div>
+          <div id="spotify-panel"></div>
+          <div id="deezer-panel" hidden>
+            <p class="muted small">Deezer ne permet plus aux applications tierces de créer des playlists.
+              RunBPM exporte la liste des morceaux, à importer dans Deezer avec un service de transfert
+              (TuneMyMusic, Soundiiz…).</p>
+            <p class="muted small">Les morceaux absents de Deezer seront sautés : pendant la course, recalez
+              le métronome avec les boutons ◀ ▶.</p>
+          </div>
+          <div id="none-panel" hidden>
+            <p class="muted small">Exportez la playlist en M3U pour la lire avec le lecteur de musique de votre choix.</p>
+          </div>
+        </div>
       </section>
+
+      <details id="library-view" class="card library-view" hidden></details>
 
       <div id="messages" class="messages" aria-live="polite"></div>
 
       <section id="results" class="results" hidden>
         <div class="stats" id="stats"></div>
+
+        <div class="card run">
+          <div class="card-head">
+            <h2>Pendant la course</h2>
+            <span id="run-sync" class="muted small"></span>
+          </div>
+          <p class="muted small" id="run-help"></p>
+          <div class="run-main">
+            <div class="controls">
+              <button type="button" id="run-prev" class="icon" aria-label="Morceau précédent" title="Morceau précédent">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>
+              </button>
+              <button type="button" id="run-toggle" class="icon primary" aria-label="Départ" title="Départ / pause">
+                <svg viewBox="0 0 24 24" aria-hidden="true" class="i-play"><path d="M7 4v16l13-8z"/></svg>
+                <svg viewBox="0 0 24 24" aria-hidden="true" class="i-pause"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
+              </button>
+              <button type="button" id="run-next" class="icon" aria-label="Morceau suivant" title="Morceau suivant">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>
+              </button>
+            </div>
+            <div class="now-info">
+              <div id="run-title" class="song-title">—</div>
+              <div id="run-sub" class="muted small">&nbsp;</div>
+              <input type="range" id="run-seek" min="0" max="1000" value="0" aria-label="Position dans le morceau" hidden />
+              <div class="times muted small"><span id="run-time">0:00</span><span id="run-km"></span><button type="button" class="link" id="run-reset">Remettre à zéro</button></div>
+            </div>
+            <div class="now-cad">
+              <span class="label">Métronome</span>
+              <span id="run-cad" class="value">—</span>
+              <span class="unit">pas/min</span>
+            </div>
+          </div>
+          <div class="player-options">
+            <label class="check" id="overlay-row"><input type="checkbox" id="m-overlay" /> Superposer le métronome à la musique</label>
+            <label class="volume">Volume du métronome <input type="range" id="m-volume" min="0" max="100" value="60" /></label>
+            <label class="check"><input type="checkbox" id="keep-awake" checked /> Garder l’écran allumé</label>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-head">
             <h2>Profil, cadence et morceaux</h2>
@@ -108,17 +188,21 @@
             <h2>Playlist</h2>
             <div class="row">
               <button type="button" id="reroll">Autre proposition</button>
+              <button type="button" id="create-spotify" class="primary" hidden>Créer la playlist Spotify</button>
+              <button type="button" id="create-navidrome" hidden>Créer la playlist dans Navidrome</button>
+              <button type="button" id="export-deezer" class="primary" hidden>Exporter pour Deezer</button>
               <button type="button" id="export-m3u">M3U</button>
               <button type="button" id="export-csv">CSV</button>
               <button type="button" id="export-json">JSON</button>
             </div>
           </div>
+          <p id="service-status" class="small" hidden></p>
           <div class="table-wrap">
             <table id="playlist">
               <thead>
                 <tr>
                   <th>#</th><th>Début</th><th>Km</th><th>Morceau</th><th class="num">BPM</th>
-                  <th class="num">Lecture</th><th class="num">Pas/min</th><th class="num">Cible</th>
+                  <th class="num">Tempo</th><th class="num">Pas/min</th><th class="num">Cible</th>
                 </tr>
               </thead>
               <tbody></tbody>

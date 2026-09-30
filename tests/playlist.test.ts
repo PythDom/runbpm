@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { demoLibrary } from '../src/core/demo';
-import { toCsv, toM3U } from '../src/core/export';
+import { toCsv, toM3U, toTransferCsv, toTransferText } from '../src/core/export';
 import type { Song } from '../src/core/library';
 import { planRun } from '../src/core/pacing';
 import { generatePlaylist } from '../src/core/playlist';
@@ -86,5 +86,7 @@ describe('exports', () => {
     expect(m3u).toContain('music/a.mp3');
     expect(m3u).toContain('#RUNBPM:rate=');
     expect(toCsv(p)).toContain('"Titre, ""cité"""');
+    expect(toTransferText(p)).toBe('x - Titre, "cité"\n');
+    expect(toTransferCsv(p)).toBe('Track name,Artist name\n"Titre, ""cité""",x\n');
   });
 });
