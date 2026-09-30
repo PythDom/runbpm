@@ -1,3 +1,4 @@
+import { refineTempo } from '../core/beats';
 import { detectTempo, mixToMono } from '../core/bpm';
 import type { Song } from '../core/library';
 import { AUDIO_EXTENSIONS, guessFromFileName } from '../core/names';
@@ -98,9 +99,12 @@ export async function measureTempo(src: AudioSource, audioStart = 0): Promise<{ 
   const len = Math.min(audio.length, ANALYSIS_SECONDS * audio.sampleRate);
   const from = Math.floor((audio.length - len) / 2);
   const channels = Array.from({ length: audio.numberOfChannels }, (_, c) => audio!.getChannelData(c).subarray(from, from + len));
-  const tempo = detectTempo(mixToMono(channels), audio.sampleRate);
+  const mono = mixToMono(channels);
+  const tempo = detectTempo(mono, audio.sampleRate);
   if (!tempo) throw new Error('aucune pulsation détectée');
-  return { ...tempo, decodedDuration: partial ? undefined : audio.duration };
+  // Précision : tempo affiné par le suivi des temps (régression sur les temps détectés).
+  const bpm = refineTempo(mono, audio.sampleRate, tempo.bpm);
+  return { bpm, confidence: tempo.confidence, decodedDuration: partial ? undefined : audio.duration };
 }
 
 /** Analyse un fichier local ; lève une erreur explicite en cas d'échec. */

@@ -24,7 +24,7 @@ const LIBRARY_KEY = 'runbpm.library';
 const SERVICE_KEY = 'runbpm.service';
 /** Réglages du formulaire conservés pendant l'aller-retour de connexion à Spotify. */
 // (cadence de base et coefficients de pente sont mémorisés dans le profil coureur)
-const SETTINGS_IDS = ['pace', 'speed', 'mode', 'tolerance', 'stretch', 'half-time', 'repeat', 'use-tag-bpm', 'm-volume', 'm-overlay', 'keep-awake'];
+const SETTINGS_IDS = ['pace', 'speed', 'mode', 'tolerance', 'stretch', 'half-time', 'repeat', 'use-tag-bpm', 'm-volume', 'm-overlay', 'm-offset', 'keep-awake'];
 const PENDING_KEY = 'runbpm.pending';
 
 const state: {
@@ -424,6 +424,7 @@ function renderService(): void {
   $('navidrome-panel').hidden = s !== 'navidrome';
   $('stretch-row').hidden = s !== 'navidrome';
   $('overlay-row').hidden = s !== 'navidrome';
+  $('offset-row').hidden = s !== 'navidrome';
   $('run-seek').hidden = s !== 'navidrome';
   $('spotify-panel').hidden = s !== 'spotify';
   $('deezer-panel').hidden = s !== 'deezer';
@@ -736,7 +737,16 @@ function renderPlayerRun(snap: PlayerSnapshot): void {
   const toggle = $('run-toggle');
   toggle.classList.toggle('playing', snap.playing);
   toggle.setAttribute('aria-label', snap.playing ? 'Pause' : 'Lecture');
-  $('run-sync').textContent = 'Lecture depuis Navidrome';
+  const overlay = $<HTMLInputElement>('m-overlay').checked;
+  $('run-sync').textContent =
+    'Lecture depuis Navidrome' +
+    (!overlay
+      ? ''
+      : snap.beatSync === 'calé'
+        ? ' · métronome calé sur les temps'
+        : snap.beatSync === 'analyse'
+          ? ' · repérage des temps…'
+          : ' · métronome libre (temps non repérés)');
   $('run-help').textContent = snap.error ?? 'Les morceaux sont lus dans RunBPM, au tempo ajusté (hauteur de voix préservée).';
   $('run-help').classList.toggle('error-text', !!snap.error);
   const entry = current?.playlist.entries[snap.index];
@@ -785,9 +795,23 @@ function syncCompanionOptions(): void {
   companion.metronome.setVolume(volume);
   player.metronome.setVolume(volume);
   player.setOverlay($<HTMLInputElement>('m-overlay').checked);
+  const offset = Number($<HTMLInputElement>('m-offset').value);
+  player.setOffset(offset);
+  try {
+    localStorage.setItem('runbpm.clickOffset', String(offset));
+  } catch {
+    /* réglage non mémorisé */
+  }
+  $('m-offset-val').textContent = `${offset > 0 ? '+' : ''}${offset} ms`;
   companion.keepScreenOn = $<HTMLInputElement>('keep-awake').checked;
 }
-for (const id of ['m-volume', 'm-overlay', 'keep-awake']) $(id).addEventListener('input', syncCompanionOptions);
+try {
+  const savedOffset = localStorage.getItem('runbpm.clickOffset');
+  if (savedOffset !== null) $<HTMLInputElement>('m-offset').value = savedOffset;
+} catch {
+  /* pas de réglage mémorisé */
+}
+for (const id of ['m-volume', 'm-overlay', 'm-offset', 'keep-awake']) $(id).addEventListener('input', syncCompanionOptions);
 syncCompanionOptions();
 
 // Barre d'espace = départ / pause (hors champs de saisie).

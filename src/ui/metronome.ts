@@ -68,6 +68,23 @@ export class Metronome {
     this.pending = [];
   }
 
+  /** Horloge audio partagée (pour planifier des clics à des instants précis). */
+  get audioContext(): AudioContext {
+    return this.context();
+  }
+
+  /** Planifie un clic à l'instant `time` de l'horloge audio (mode « calé sur les temps »). */
+  clickAt(time: number): void {
+    if (time > this.context().currentTime) this.click(time);
+  }
+
+  /** Annule les clics planifiés qui n'ont pas encore sonné. */
+  cancelScheduled(): void {
+    const now = this.context().currentTime;
+    for (const p of this.pending) if (p.time > now) silence(p.osc);
+    this.pending = this.pending.filter((p) => p.time <= now);
+  }
+
   private context(): AudioContext {
     if (!this.ctx) this.ctx = new AudioContext();
     return this.ctx;
