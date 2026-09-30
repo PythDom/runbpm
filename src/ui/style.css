@@ -590,7 +590,8 @@ button.icon.primary svg {
   white-space: nowrap;
 }
 
-#p-seek {
+#p-seek,
+#run-seek {
   width: 100%;
   margin: 6px 0 0;
   accent-color: var(--accent);
@@ -827,4 +828,10 @@ tr.doubtful td {
 
 .times button.link {
   font-size: inherit;
+}
+
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

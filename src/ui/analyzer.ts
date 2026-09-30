@@ -1,7 +1,7 @@
 import { detectTempo, mixToMono } from '../core/bpm';
 import type { Song } from '../core/library';
 import { AUDIO_EXTENSIONS, guessFromFileName } from '../core/names';
-import { blobReader, readTags } from '../core/tags';
+import { blobReader, readTags, type ReadFn } from '../core/tags';
 
 /**
  * Construction de la bibliothèque à partir de fichiers audio : métadonnées (tags ou nom de
@@ -43,30 +43,40 @@ async function decode(buffer: ArrayBuffer): Promise<AudioBuffer> {
   return ctx.decodeAudioData(buffer);
 }
 
-/** Analyse un fichier ; lève une erreur explicite en cas d'échec. */
-export async function analyzeFile(file: File, opts: AnalyzeOptions): Promise<Song> {
-  const tags = await readTags(blobReader(file), file.size);
-  const guess = guessFromFileName(file.webkitRelativePath || file.name);
-  const base = {
-    id: `f${Date.now().toString(36)}${++idCounter}`,
-    title: tags.title ?? guess.title,
-    artist: tags.artist ?? guess.artist ?? 'Artiste inconnu',
-    file: file.webkitRelativePath || file.name,
-    fileKey: fileKey(file),
+/** Source audio lisible par morceaux : fichier local ou fichier distant (Navidrome). */
+export interface AudioSource {
+  /** Nom ou chemin, pour les messages et la détection du format. */
+  name: string;
+  size: number;
+  /** Lecture d'une plage d'octets. */
+  read: ReadFn;
+  /** Contenu décodable complet (ou extrait transcodé) si la tranche MP3 ne suffit pas. */
+  readForDecoding(): Promise<ArrayBuffer>;
+  /** Dernier recours si le contenu précédent n'est pas décodable (ex. fichier d'origine complet). */
+  fallbackForDecoding?(): Promise<ArrayBuffer>;
+}
+
+export function fileSource(file: File): AudioSource {
+  return {
+    name: file.webkitRelativePath || file.name,
+    size: file.size,
+    read: blobReader(file),
+    readForDecoding: () => file.arrayBuffer(),
   };
+}
 
-  if (opts.useTagBpm && tags.bpm && tags.duration) {
-    return { ...base, bpm: Math.round(tags.bpm * 10) / 10, duration: Math.round(tags.duration), bpmSource: 'tag' };
-  }
-
-  // MP3 volumineux : on décode une tranche au milieu (les trames MP3 se resynchronisent seules).
-  const isMp3 = /\.mp3$/i.test(file.name) || file.type === 'audio/mpeg';
+/**
+ * Mesure le tempo d'une source. Pour un MP3 volumineux, seule une tranche centrale est lue et
+ * décodée (les trames MP3 se resynchronisent seules).
+ */
+export async function measureTempo(src: AudioSource, audioStart = 0): Promise<{ bpm: number; confidence: number; decodedDuration?: number }> {
   let audio: AudioBuffer | undefined;
   let partial = false;
-  if (isMp3 && file.size > MP3_SLICE_BYTES * 1.5) {
-    const start = (tags.audioStart ?? 0) + Math.floor((file.size - (tags.audioStart ?? 0) - MP3_SLICE_BYTES) / 2);
+  if (/\.mp3$/i.test(src.name) && src.size > MP3_SLICE_BYTES * 1.5) {
+    const start = audioStart + Math.floor((src.size - audioStart - MP3_SLICE_BYTES) / 2);
     try {
-      audio = await decode(await file.slice(start, start + MP3_SLICE_BYTES).arrayBuffer());
+      const bytes = await src.read(start, MP3_SLICE_BYTES);
+      audio = await decode(bytes.slice().buffer);
       partial = true;
     } catch {
       audio = undefined;
@@ -74,22 +84,44 @@ export async function analyzeFile(file: File, opts: AnalyzeOptions): Promise<Son
   }
   if (!audio) {
     try {
-      audio = await decode(await file.arrayBuffer());
+      audio = await decode(await src.readForDecoding());
     } catch {
-      throw new Error('format non décodable par le navigateur');
+      if (!src.fallbackForDecoding) throw new Error('format non décodable par le navigateur');
+      try {
+        audio = await decode(await src.fallbackForDecoding());
+      } catch {
+        throw new Error('format non décodable par le navigateur');
+      }
     }
   }
-
-  const duration = tags.duration ?? (partial ? undefined : audio.duration);
-  if (!duration || duration < 20) throw new Error('durée inconnue ou trop courte');
-
   // Extrait central de 90 s maximum.
   const len = Math.min(audio.length, ANALYSIS_SECONDS * audio.sampleRate);
   const from = Math.floor((audio.length - len) / 2);
   const channels = Array.from({ length: audio.numberOfChannels }, (_, c) => audio!.getChannelData(c).subarray(from, from + len));
   const tempo = detectTempo(mixToMono(channels), audio.sampleRate);
   if (!tempo) throw new Error('aucune pulsation détectée');
+  return { ...tempo, decodedDuration: partial ? undefined : audio.duration };
+}
 
+/** Analyse un fichier local ; lève une erreur explicite en cas d'échec. */
+export async function analyzeFile(file: File, opts: AnalyzeOptions): Promise<Song> {
+  const src = fileSource(file);
+  const tags = await readTags(src.read, src.size);
+  const guess = guessFromFileName(src.name);
+  const base = {
+    id: `f${Date.now().toString(36)}${++idCounter}`,
+    title: tags.title ?? guess.title,
+    artist: tags.artist ?? guess.artist ?? 'Artiste inconnu',
+    file: src.name,
+    fileKey: fileKey(file),
+  };
+
+  if (opts.useTagBpm && tags.bpm && tags.duration) {
+    return { ...base, bpm: Math.round(tags.bpm * 10) / 10, duration: Math.round(tags.duration), bpmSource: 'tag' };
+  }
+  const tempo = await measureTempo(src, tags.audioStart);
+  const duration = tags.duration ?? tempo.decodedDuration;
+  if (!duration || duration < 20) throw new Error('durée inconnue ou trop courte');
   return { ...base, bpm: tempo.bpm, duration: Math.round(duration), bpmSource: 'analyse', confidence: tempo.confidence };
 }
 

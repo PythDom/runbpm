@@ -87,9 +87,14 @@
           <div id="library-summary" class="summary muted">Aucun morceau.</div>
           <details>
             <summary>Options de sélection</summary>
-            <label>Tolérance (±%)
-              <input type="number" id="tolerance" value="3" min="0.5" max="10" step="0.5" />
-            </label>
+            <div class="grid2">
+              <label>Tolérance (±%)
+                <input type="number" id="tolerance" value="3" min="0.5" max="10" step="0.5" />
+              </label>
+              <label id="stretch-row" title="Accélération ou ralentissement maximal des morceaux (hauteur de voix préservée)">Tempo ajustable (±%)
+                <input type="number" id="stretch" value="4" min="0" max="10" step="0.5" />
+              </label>
+            </div>
             <label class="check"><input type="checkbox" id="half-time" checked /> Accepter les morceaux à mi-tempo (ex. 88 BPM → 176 pas/min)</label>
             <label class="check"><input type="checkbox" id="repeat" /> Autoriser les répétitions</label>
           </details>
@@ -99,11 +104,13 @@
           <h2><span class="step">4</span> Streaming</h2>
           <label>Playlist à créer sur
             <select id="service">
+              <option value="navidrome">Navidrome / Subsonic (lecture dans RunBPM)</option>
               <option value="spotify">Spotify</option>
               <option value="deezer">Deezer</option>
               <option value="none">Aucun service (fichiers locaux, M3U)</option>
             </select>
           </label>
+          <div id="navidrome-panel"></div>
           <div id="spotify-panel"></div>
           <div id="deezer-panel" hidden>
             <p class="muted small">Deezer ne permet plus aux applications tierces de créer des playlists.
@@ -147,6 +154,7 @@
             <div class="now-info">
               <div id="run-title" class="song-title">—</div>
               <div id="run-sub" class="muted small">&nbsp;</div>
+              <input type="range" id="run-seek" min="0" max="1000" value="0" aria-label="Position dans le morceau" hidden />
               <div class="times muted small"><span id="run-time">0:00</span><span id="run-km"></span><button type="button" class="link" id="run-reset">Remettre à zéro</button></div>
             </div>
             <div class="now-cad">
@@ -156,6 +164,7 @@
             </div>
           </div>
           <div class="player-options">
+            <label class="check" id="overlay-row"><input type="checkbox" id="m-overlay" /> Superposer le métronome à la musique</label>
             <label class="volume">Volume du métronome <input type="range" id="m-volume" min="0" max="100" value="60" /></label>
             <label class="check"><input type="checkbox" id="keep-awake" checked /> Garder l’écran allumé</label>
           </div>
@@ -180,6 +189,7 @@
             <div class="row">
               <button type="button" id="reroll">Autre proposition</button>
               <button type="button" id="create-spotify" class="primary" hidden>Créer la playlist Spotify</button>
+              <button type="button" id="create-navidrome" hidden>Créer la playlist dans Navidrome</button>
               <button type="button" id="export-deezer" class="primary" hidden>Exporter pour Deezer</button>
               <button type="button" id="export-m3u">M3U</button>
               <button type="button" id="export-csv">CSV</button>
@@ -192,7 +202,7 @@
               <thead>
                 <tr>
                   <th>#</th><th>Début</th><th>Km</th><th>Morceau</th><th class="num">BPM</th>
-                  <th class="num">Pas/min</th><th class="num">Cible</th>
+                  <th class="num">Tempo</th><th class="num">Pas/min</th><th class="num">Cible</th>
                 </tr>
               </thead>
               <tbody></tbody>

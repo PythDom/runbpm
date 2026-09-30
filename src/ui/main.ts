@@ -10,15 +10,19 @@ import { analyzeFiles, fileKey } from './analyzer';
 import { renderChart } from './chart';
 import { RunCompanion, type CompanionSnapshot } from './companion';
 import { LibraryView, LOW_CONFIDENCE, NO_PULSE } from './libraryView';
+import { importNavidrome } from './navidromeImport';
+import { NavidromePanel } from './navidromePanel';
+import { RunPlayer, type PlayerSnapshot, type PlayerTrack } from './player';
 import { SpotifyPanel } from './spotifyPanel';
 
-type Service = 'spotify' | 'deezer' | 'none';
+type Service = 'navidrome' | 'spotify' | 'deezer' | 'none';
+const SERVICES: Service[] = ['navidrome', 'spotify', 'deezer', 'none'];
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const LIBRARY_KEY = 'runbpm.library';
 const SERVICE_KEY = 'runbpm.service';
 /** Réglages du formulaire conservés pendant l'aller-retour de connexion à Spotify. */
-const SETTINGS_IDS = ['pace', 'speed', 'mode', 'base-cadence', 'uphill', 'downhill', 'tolerance', 'half-time', 'repeat', 'use-tag-bpm', 'm-volume', 'keep-awake'];
+const SETTINGS_IDS = ['pace', 'speed', 'mode', 'base-cadence', 'uphill', 'downhill', 'tolerance', 'stretch', 'half-time', 'repeat', 'use-tag-bpm', 'm-volume', 'm-overlay', 'keep-awake'];
 const PENDING_KEY = 'runbpm.pending';
 
 const state: {
@@ -30,6 +34,7 @@ const state: {
 } = { library: loadLibrary(), seed: 1 };
 let lastExport: { m3u: string; csv: string; json: string } | undefined;
 let companionSignature = '';
+let playerSignature = '';
 let companionSynced = false;
 
 // ---------- Utilitaires ----------
@@ -318,8 +323,89 @@ const spotify = new SpotifyPanel($('spotify-panel'), {
   },
 });
 
+// Navidrome / Subsonic : lecture dans RunBPM avec ajustement du tempo.
+let navidromeImport: { cancelled: boolean } | undefined;
+
+const navidrome = new NavidromePanel($('navidrome-panel'), {
+  onConnectionChange: () => update(),
+  onImport: () => void runNavidromeImport(),
+  onStopImport: () => {
+    if (navidromeImport) navidromeImport.cancelled = true;
+  },
+});
+
+async function runNavidromeImport(): Promise<void> {
+  const client = navidrome.client;
+  if (!client || navidromeImport) return;
+  const signal = { cancelled: false };
+  navidromeImport = signal;
+  let sinceSave = 0;
+  const started = performance.now();
+  try {
+    const { progress, errors } = await importNavidrome(
+      client,
+      state.library,
+      { useTagBpm: $<HTMLInputElement>('use-tag-bpm').checked },
+      (song) => {
+        state.library = mergeLibraries(state.library, [song]);
+        if (++sinceSave >= 20) {
+          sinceSave = 0;
+          saveLibrary();
+          renderLibrarySummary();
+        }
+      },
+      (p) => {
+        const elapsed = (performance.now() - started) / 1000;
+        const eta = p.phase === 'analyse' && p.done > 2 ? (elapsed / p.done) * (p.total - p.done) : undefined;
+        navidrome.setImportProgress({
+          done: p.done,
+          total: p.phase === 'liste' ? p.done + 1 : p.total,
+          text:
+            p.phase === 'liste'
+              ? `Lecture du catalogue : ${p.done} morceaux…`
+              : `Tempo : ${p.done}/${p.total}` + (eta !== undefined ? ` · environ ${formatDuration(eta)} restant` : '') + (p.current ? ` · ${p.current}` : ''),
+        });
+      },
+      signal,
+    );
+    const summary =
+      `Import ${signal.cancelled ? 'interrompu' : 'terminé'} : ${progress.added} morceau(x) ajouté(s)` +
+      (progress.linked ? `, ${progress.linked} déjà connu(s) relié(s) au serveur` : '') +
+      (progress.failed ? `, ${progress.failed} ignoré(s)` : '') +
+      '.';
+    navidrome.setImportProgress(undefined, summary);
+    if (errors.length) showMessages([], [`Morceaux ignorés : ${errors.slice(0, 5).join(' ; ')}${errors.length > 5 ? ` ; … (${errors.length - 5} autres)` : ''}`]);
+  } catch (e) {
+    navidrome.setImportProgress(undefined, (e as Error).message, true);
+  } finally {
+    navidromeImport = undefined;
+    libraryChanged();
+  }
+}
+
+$('create-navidrome').addEventListener('click', async () => {
+  const client = navidrome.client;
+  const current = state.current;
+  if (!client || !current) return;
+  try {
+    setServiceStatus('Création de la playlist dans Navidrome…');
+    await client.createPlaylist(playlistName(), current.playlist.entries.map((e) => e.song.navidromeId!));
+    setServiceStatus(
+      `Playlist « ${playlistName()} » créée dans Navidrome (${current.playlist.entries.length} morceaux). ` +
+        'Les autres applications la lisent au tempo original ; l’ajustement du tempo n’existe que dans RunBPM.',
+      'ok',
+    );
+  } catch (e) {
+    setServiceStatus((e as Error).message, 'error');
+  }
+});
+
 function renderService(): void {
   const s = service();
+  $('navidrome-panel').hidden = s !== 'navidrome';
+  $('stretch-row').hidden = s !== 'navidrome';
+  $('overlay-row').hidden = s !== 'navidrome';
+  $('run-seek').hidden = s !== 'navidrome';
   $('spotify-panel').hidden = s !== 'spotify';
   $('deezer-panel').hidden = s !== 'deezer';
   $('none-panel').hidden = s !== 'none';
@@ -393,7 +479,7 @@ $('export-deezer').addEventListener('click', () => {
 
 // ---------- Calcul et rendu ----------
 
-for (const id of ['mode', 'base-cadence', 'uphill', 'downhill', 'tolerance', 'half-time', 'repeat']) {
+for (const id of ['mode', 'base-cadence', 'uphill', 'downhill', 'tolerance', 'stretch', 'half-time', 'repeat']) {
   $(id).addEventListener('input', () => update());
   $(id).addEventListener('change', () => update());
 }
@@ -404,6 +490,7 @@ $('reroll').addEventListener('click', () => {
 });
 
 function update(extraErrors: string[] = [], extraWarnings: string[] = []): void {
+  stopOtherMode();
   const pace = parsePace(paceInput.value);
   const baseCadenceInput = $<HTMLInputElement>('base-cadence');
   if (pace) baseCadenceInput.placeholder = `auto (≈ ${estimateCadence(3600 / pace)})`;
@@ -411,15 +498,30 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   const errors = [...extraErrors];
   if (!pace) errors.push('Allure invalide : utilisez le format min:s, par exemple 5:30.');
   const svc = service();
-  // On écarte les morceaux sans pulsation détectée et, pour Spotify, ceux qu'il ne propose pas.
+  // On écarte les morceaux sans pulsation détectée ; pour Spotify, ceux qu'il ne propose pas ;
+  // pour Navidrome, ceux qui ne sont pas sur le serveur.
   const notFound = svc === 'spotify' ? spotify.notFound() : new Set<string>();
-  const library = state.library.filter((s) => !notFound.has(s.id) && !(s.confidence !== undefined && s.confidence < NO_PULSE));
+  const library = state.library.filter(
+    (s) =>
+      !notFound.has(s.id) &&
+      !(s.confidence !== undefined && s.confidence < NO_PULSE) &&
+      (svc !== 'navidrome' || (navidrome.connected && !!s.navidromeId)),
+  );
+  if (svc === 'navidrome' && state.library.length > 0 && library.length === 0) {
+    extraWarnings = [
+      ...extraWarnings,
+      navidrome.connected
+        ? 'Aucun morceau du serveur dans la bibliothèque : cliquez sur « Importer la bibliothèque du serveur ».'
+        : 'Connectez-vous à votre serveur Navidrome (carte Streaming).',
+    ];
+  }
 
   if (!state.route || library.length === 0 || !pace) {
     $('results').hidden = true;
     lastExport = undefined;
     state.current = undefined;
     loadCompanion(undefined);
+    loadPlayer([]);
     showMessages(errors, extraWarnings);
     return;
   }
@@ -435,10 +537,11 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
     uphillSensitivity: numberInput('uphill', 0.6),
     downhillSensitivity: numberInput('downhill', 0.3),
   });
-  // Les applications de streaming jouent au tempo original : aucun ajustement de vitesse.
+  // Les applications de streaming jouent au tempo original ; seul le lecteur interne (Navidrome)
+  // peut ajuster la vitesse de lecture.
   const playlist = generatePlaylist(plan, library, {
     tolerance,
-    maxStretch: 0,
+    maxStretch: svc === 'navidrome' ? numberInput('stretch', 4) / 100 : 0,
     allowHalfTime: $<HTMLInputElement>('half-time').checked,
     allowRepeat: $<HTMLInputElement>('repeat').checked,
     seed: state.seed,
@@ -466,17 +569,19 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   $('playlist').querySelector('tbody')!.innerHTML = playlist.entries
     .map((e, i) => {
       const ok = e.error <= tolerance + 1e-9;
+      const rate = e.playbackRate === 1 ? '—' : `${e.playbackRate > 1 ? '+' : ''}${((e.playbackRate - 1) * 100).toFixed(1)} %`;
       const tags = [
         svc === 'spotify' && e.song.spotifyUri ? '<span class="tag spotify" title="Trouvé sur Spotify">Spotify</span>' : '',
         e.song.confidence !== undefined && e.song.confidence < LOW_CONFIDENCE ? '<span class="tag warn" title="BPM détecté avec une confiance faible">à vérifier</span>' : '',
         e.repeated ? '<span class="tag">bis</span>' : '',
       ].join(' ');
       return `<tr class="${ok ? '' : 'off'}" data-i="${i}">
-        <td><button type="button" class="row-play" data-i="${i}" aria-label="Recaler le métronome sur le morceau ${i + 1}" title="Recaler le métronome sur ce morceau">${i + 1}</button></td>
+        <td><button type="button" class="row-play" data-i="${i}" aria-label="Aller au morceau ${i + 1}" title="${svc === 'navidrome' ? 'Lire à partir de ce morceau' : 'Recaler le métronome sur ce morceau'}">${i + 1}</button></td>
         <td>${formatDuration(e.startTime)}</td>
         <td>${km(distanceAt(plan, e.startTime), 1)}</td>
         <td><div class="song-title">${esc(e.song.title)}</div><div class="muted small">${esc(e.song.artist)} ${tags}</div></td>
         <td class="num">${e.song.bpm}${e.multiplier === 2 ? ' <span class="tag" title="Un pas par demi-temps">×2</span>' : ''}</td>
+        <td class="num">${rate}</td>
         <td class="num strong">${e.effectiveCadence}</td>
         <td class="num">${e.targetCadence}</td>
       </tr>`;
@@ -498,6 +603,20 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
 
   $('create-spotify').hidden = svc !== 'spotify' || !spotify.connected;
   $('export-deezer').hidden = svc !== 'deezer';
+  $('create-navidrome').hidden = svc !== 'navidrome' || !navidrome.connected;
+  if (svc === 'navidrome') {
+    const client = navidrome.client!;
+    loadPlayer(playlist.entries.map((entry) => ({ entry, url: client.streamUrl(entry.song.navidromeId!) })));
+    loadCompanion(undefined);
+    renderPlayerRun(player.snapshot());
+    lastExport = {
+      m3u: toM3U(playlist, playlistName()),
+      csv: toCsv(playlist),
+      json: toJson(plan, playlist, { route: route.name, targetPace: formatPace(pace) }),
+    };
+    return;
+  }
+  loadPlayer([]);
   loadCompanion(playlist);
   const syncWanted = svc === 'spotify' && spotify.connected;
   if (syncWanted !== companionSynced) {
@@ -535,6 +654,8 @@ const SYNC_LABEL: Record<CompanionSnapshot['sync'], string> = {
 };
 
 function renderRun(snap: CompanionSnapshot): void {
+  if (service() === 'navidrome') return;
+  $('run-help').classList.remove('error-text');
   const current = state.current;
   const toggle = $('run-toggle');
   toggle.classList.toggle('playing', snap.running);
@@ -566,20 +687,84 @@ function renderRun(snap: CompanionSnapshot): void {
   }
 }
 
-$('run-toggle').addEventListener('click', () => companion.toggle());
-$('run-next').addEventListener('click', () => companion.next());
-$('run-prev').addEventListener('click', () => companion.previous());
-$('run-reset').addEventListener('click', () => companion.reset());
+// ---------- Lecteur interne (Navidrome) ----------
+
+const player = new RunPlayer((snap) => renderPlayerRun(snap));
+const runSeek = $<HTMLInputElement>('run-seek');
+let seeking = false;
+
+/** Recharge le lecteur seulement si la playlist a changé (évite de l'arrêter en pleine course). */
+function loadPlayer(tracks: PlayerTrack[]): void {
+  const signature = tracks.map((t) => `${t.entry.song.id}@${t.entry.playbackRate}`).join('|');
+  if (signature === playerSignature) return;
+  playerSignature = signature;
+  player.load(tracks);
+}
+
+/** Un seul mode actif : le lecteur interne (Navidrome) ou le compagnon (métronome seul). */
+function stopOtherMode(): void {
+  if (service() === 'navidrome') companion.pause();
+  else player.pause();
+}
+
+function renderPlayerRun(snap: PlayerSnapshot): void {
+  if (service() !== 'navidrome') return;
+  const current = state.current;
+  const toggle = $('run-toggle');
+  toggle.classList.toggle('playing', snap.playing);
+  toggle.setAttribute('aria-label', snap.playing ? 'Pause' : 'Lecture');
+  $('run-sync').textContent = 'Lecture depuis Navidrome';
+  $('run-help').textContent = snap.error ?? 'Les morceaux sont lus dans RunBPM, au tempo ajusté (hauteur de voix préservée).';
+  $('run-help').classList.toggle('error-text', !!snap.error);
+  const entry = current?.playlist.entries[snap.index];
+  if (!current || !entry) {
+    $('run-title').textContent = '—';
+    $('run-sub').innerHTML = '&nbsp;';
+    $('run-cad').textContent = '—';
+    $('run-km').textContent = '';
+    $('run-time').textContent = '0:00';
+  } else {
+    const runTime = entry.startTime + snap.position;
+    const rate = entry.playbackRate === 1 ? 'tempo original' : `tempo ${entry.playbackRate > 1 ? '+' : ''}${((entry.playbackRate - 1) * 100).toFixed(1)} %`;
+    $('run-title').textContent = `${snap.index + 1}. ${entry.song.title}`;
+    $('run-sub').textContent = `${entry.song.artist} · ${entry.song.bpm} BPM${entry.multiplier === 2 ? ' ×2' : ''} · ${rate} · ${formatDuration(snap.position)} / ${formatDuration(snap.duration)}`;
+    $('run-cad').textContent = String(Math.round(entry.effectiveCadence));
+    $('run-time').textContent = formatDuration(runTime);
+    $('run-km').textContent = runTime >= current.plan.totalTime ? 'Arrivée !' : `km ${km(distanceAt(current.plan, runTime), 1)} · cible ${cadenceAt(current.plan, runTime)} pas/min`;
+  }
+  $('run-cad').classList.toggle('silent', !snap.playing);
+  if (!seeking) runSeek.value = String(snap.duration > 0 ? Math.round((snap.position / snap.duration) * 1000) : 0);
+  for (const row of $('playlist').querySelectorAll<HTMLTableRowElement>('tbody tr')) {
+    row.classList.toggle('current', Number(row.dataset.i) === snap.index && (snap.playing || snap.position > 0));
+  }
+}
+
+runSeek.addEventListener('input', () => (seeking = true));
+runSeek.addEventListener('change', () => {
+  seeking = false;
+  player.seek(Number(runSeek.value) / 1000);
+});
+
+const usePlayer = () => service() === 'navidrome';
+$('run-toggle').addEventListener('click', () => (usePlayer() ? player.toggle() : companion.toggle()));
+$('run-next').addEventListener('click', () => (usePlayer() ? player.next() : companion.next()));
+$('run-prev').addEventListener('click', () => (usePlayer() ? player.previous() : companion.previous()));
+$('run-reset').addEventListener('click', () => (usePlayer() ? player.jump(0) : companion.reset()));
 $('playlist').addEventListener('click', (ev) => {
   const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button.row-play');
-  if (btn) companion.jumpTo(Number(btn.dataset.i));
+  if (!btn) return;
+  if (usePlayer()) player.jump(Number(btn.dataset.i));
+  else companion.jumpTo(Number(btn.dataset.i));
 });
 
 function syncCompanionOptions(): void {
-  companion.metronome.setVolume(Number($<HTMLInputElement>('m-volume').value) / 100);
+  const volume = Number($<HTMLInputElement>('m-volume').value) / 100;
+  companion.metronome.setVolume(volume);
+  player.metronome.setVolume(volume);
+  player.setOverlay($<HTMLInputElement>('m-overlay').checked);
   companion.keepScreenOn = $<HTMLInputElement>('keep-awake').checked;
 }
-for (const id of ['m-volume', 'keep-awake']) $(id).addEventListener('input', syncCompanionOptions);
+for (const id of ['m-volume', 'm-overlay', 'keep-awake']) $(id).addEventListener('input', syncCompanionOptions);
 syncCompanionOptions();
 
 // Barre d'espace = départ / pause (hors champs de saisie).
@@ -587,7 +772,8 @@ document.addEventListener('keydown', (ev) => {
   const target = ev.target as HTMLElement;
   if (ev.code !== 'Space' || $('results').hidden || target.closest('input, select, textarea, button, summary')) return;
   ev.preventDefault();
-  companion.toggle();
+  if (usePlayer()) player.toggle();
+  else companion.toggle();
 });
 
 // ---------- Exports ----------
@@ -620,7 +806,7 @@ function restorePending(): void {
 
 try {
   const saved = localStorage.getItem(SERVICE_KEY);
-  if (saved === 'spotify' || saved === 'deezer' || saved === 'none') $<HTMLSelectElement>('service').value = saved;
+  if (SERVICES.includes(saved as Service)) $<HTMLSelectElement>('service').value = saved!;
 } catch {
   /* préférence indisponible */
 }
@@ -630,3 +816,4 @@ libraryView.render();
 restorePending();
 update();
 void spotify.init();
+void navidrome.init();

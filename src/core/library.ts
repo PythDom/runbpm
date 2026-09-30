@@ -23,6 +23,8 @@ export interface Song {
   confidence?: number;
   /** Empreinte du fichier analysé (chemin, taille, date) : évite de le réanalyser. */
   fileKey?: string;
+  /** Identifiant du morceau sur le serveur Navidrome / Subsonic. */
+  navidromeId?: string;
 }
 
 export interface LibraryImport {

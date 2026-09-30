@@ -3,10 +3,13 @@
 Prépare une playlist dont le tempo (BPM) suit la **cadence de course idéale** tout au long d’un parcours,
 en tenant compte du **dénivelé** et de l’**allure désirée**, puis accompagne la course d’un **métronome**.
 
-- **À la maison** : RunBPM analyse votre dossier de musique (artiste, titre, **BPM mesuré**), calcule la
-  playlist adaptée au parcours et la crée sur **Spotify** (ou l’exporte pour **Deezer**).
-- **Pendant la course** : la musique est jouée par l’application officielle du service ; RunBPM superpose
-  un métronome au tempo du morceau en cours.
+- **À la maison** : RunBPM analyse votre musique (dossier local ou serveur **Navidrome**) : artiste, titre,
+  **BPM mesuré** ; puis calcule la playlist adaptée au parcours.
+- **Pendant la course**, au choix :
+  - **Navidrome / Subsonic** : RunBPM lit lui-même les morceaux depuis votre serveur, **avec ajustement du
+    tempo** (hauteur de voix préservée) et métronome superposable ;
+  - **Spotify / Deezer** : la musique est jouée par l’application officielle ; RunBPM superpose un
+    métronome au tempo du morceau en cours.
 
 Application web 100 % locale : tout est calculé dans le navigateur, aucun fichier audio n’est envoyé.
 
@@ -54,7 +57,26 @@ L’import CSV/JSON reste possible (voir *Formats d’entrée*).
    le tempo colle le mieux à la cadence cible **sur toute sa durée d’écoute**. Les services de streaming
    jouent au tempo original : seuls les morceaux déjà au bon BPM (ou à mi-tempo) sont retenus.
 
-## 3. Création sur le service de streaming
+## 3. Lecture ou création de la playlist
+
+### Navidrome / Subsonic (lecture dans RunBPM)
+Pour un serveur auto-hébergé compatible Subsonic / OpenSubsonic (Navidrome, Gonic, Airsonic…).
+
+- **Connexion** : adresse du serveur (ex. `http://192.168.1.10:4533`), utilisateur, mot de passe.
+  Authentification Subsonic par jeton : seuls l’utilisateur, le sel et `md5(mot de passe + sel)` sont
+  conservés dans le navigateur, jamais le mot de passe. Reconnexion automatique au rechargement.
+- **Import de la bibliothèque** (`search3` par pages de 500) : BPM des tags du serveur s’il existe
+  (option), sinon mesuré sur un extrait : tranche centrale lue par requête HTTP *Range* pour les MP3,
+  début du morceau transcodé en MP3 par le serveur pour les autres formats (à défaut, fichier d’origine).
+  Un morceau déjà présent dans la bibliothèque (même titre et artiste) est relié au serveur sans nouvelle
+  analyse ; ses corrections de BPM sont conservées.
+- **Lecture** : fichier d’origine diffusé par le serveur, vitesse de lecture ajustée (± « Tempo ajustable »,
+  4 % par défaut, `preservesPitch`), barre de position, morceau suivant / précédent, commandes de l’écran
+  verrouillé (Media Session), métronome superposable.
+- **« Créer la playlist dans Navidrome »** : pour l’écouter aussi depuis vos autres applications Subsonic
+  (au tempo original, l’ajustement n’existant que dans RunBPM).
+- Navidrome autorise les appels depuis n’importe quelle page (CORS). Si RunBPM est servi en HTTPS, le
+  serveur doit l’être aussi (sinon le navigateur bloque) : en local, ouvrez RunBPM en `http://127.0.0.1`.
 
 ### Spotify
 « Créer la playlist Spotify » cherche chaque morceau sur Spotify (titre, artiste, durée ; seules les
@@ -133,6 +155,7 @@ src/core/          moteur, sans dépendance au DOM (testé)
   pacing.ts          plan de course : vitesse, cadence, modèle de Minetti
   library.ts         bibliothèque, import CSV/JSON
   bpm.ts             détection du tempo (flux spectral, autocorrélation, peigne)
+  md5.ts             MD5 pour l’authentification Subsonic
   tags.ts            lecture des tags ID3 / FLAC / Ogg / MP4 / WAV et des durées
   names.ts           noms de fichiers, normalisation
   playlist.ts        sélection des morceaux
@@ -141,8 +164,12 @@ src/core/          moteur, sans dépendance au DOM (testé)
   export.ts          M3U / CSV / JSON / liste pour transfert (Deezer)
   demo.ts            bibliothèque fictive de démonstration
 src/services/spotify.ts   connexion OAuth PKCE, recherche, création de playlist, état du lecteur
+src/services/subsonic.ts  client Subsonic / Navidrome (jeton, search3, stream, Range, playlists)
 src/ui/            interface (TypeScript sans framework)
   analyzer.ts        analyse des fichiers audio (décodage Web Audio + tags + tempo)
+  navidromeImport.ts import de la bibliothèque du serveur, mesure du tempo à distance
+  navidromePanel.ts  connexion au serveur Navidrome
+  player.ts          lecteur interne (flux du serveur, ajustement du tempo, métronome superposé)
   libraryView.ts     tableau de la bibliothèque (correction des BPM)
   companion.ts       compagnon de course (chronomètre / synchro Spotify, Wake Lock)
   metronome.ts       métronome Web Audio
