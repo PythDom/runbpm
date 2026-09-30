@@ -57,6 +57,23 @@ L’import CSV/JSON reste possible (voir *Formats d’entrée*).
    le tempo colle le mieux à la cadence cible **sur toute sa durée d’écoute**. Les services de streaming
    jouent au tempo original : seuls les morceaux déjà au bon BPM (ou à mi-tempo) sont retenus.
 
+### Profils coureur et calibrage personnel
+
+Chaque **profil coureur** (carte Course) garde ses propres réglages : cadence au plat, coefficients de
+montée et de descente. Dans « Réglages avancés et calibrage », on peut **calibrer** un profil avec une
+ou plusieurs sorties de sa montre (**FIT** ou TCX avec cadence), de préférence vallonnées :
+
+- les sorties sont découpées en tronçons de 100 m (vitesse, pente, cadence) ; arrêts, marche, cadences
+  aberrantes et pentes extrêmes sont écartés ; la cadence « un pied » des montres est doublée ;
+- le modèle `cadence = k0 + kv × vitesse + a × montée(%) + b × descente(%)` est ajusté par moindres
+  carrés, avec un rappel doux vers les valeurs par défaut : une sortie plate ne renseigne pas sur la
+  pente, les coefficients de pente restent alors proches de 0,6 / 0,3 ;
+- une fois calibré, la cadence au plat suit l'allure choisie, et l'effet de la vitesse est appliqué
+  section par section (en « effort constant », ralentir en montée baisse aussi un peu la cadence).
+
+Le lecteur FIT est intégré (sans dépendance) : en-têtes compressés, gros/petit-boutisme, CRC, activités
+autres que la course à pied refusées.
+
 ## 3. Lecture ou création de la playlist
 
 ### Navidrome / Subsonic (lecture dans RunBPM)
@@ -156,6 +173,9 @@ src/core/          moteur, sans dépendance au DOM (testé)
   library.ts         bibliothèque, import CSV/JSON
   bpm.ts             détection du tempo (flux spectral, autocorrélation, peigne)
   md5.ts             MD5 pour l’authentification Subsonic
+  fit.ts             lecture des fichiers FIT (montres)
+  activity.ts        sortie enregistrée → tronçons vitesse / pente / cadence
+  calibration.ts     ajustement du modèle personnel de cadence
   tags.ts            lecture des tags ID3 / FLAC / Ogg / MP4 / WAV et des durées
   names.ts           noms de fichiers, normalisation
   playlist.ts        sélection des morceaux
@@ -170,6 +190,7 @@ src/ui/            interface (TypeScript sans framework)
   navidromeImport.ts import de la bibliothèque du serveur, mesure du tempo à distance
   navidromePanel.ts  connexion au serveur Navidrome
   player.ts          lecteur interne (flux du serveur, ajustement du tempo, métronome superposé)
+  profiles.ts        profils coureur et calibrage
   libraryView.ts     tableau de la bibliothèque (correction des BPM)
   companion.ts       compagnon de course (chronomètre / synchro Spotify, Wake Lock)
   metronome.ts       métronome Web Audio
@@ -182,4 +203,3 @@ scripts/generate-samples.mjs   régénère les fichiers d’exemple
 ## Pistes d’évolution
 - Vérifier la disponibilité des morceaux sur Deezer via son API publique de recherche.
 - Analyse en tâche de fond (Web Worker) pour les très grosses collections.
-- Calibrage personnel de la cadence à partir d’une sortie enregistrée (fichier FIT/TCX avec cadence).

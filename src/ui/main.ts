@@ -13,6 +13,7 @@ import { LibraryView, LOW_CONFIDENCE, NO_PULSE } from './libraryView';
 import { importNavidrome } from './navidromeImport';
 import { NavidromePanel } from './navidromePanel';
 import { RunPlayer, type PlayerSnapshot, type PlayerTrack } from './player';
+import { ProfilePanel } from './profiles';
 import { SpotifyPanel } from './spotifyPanel';
 
 type Service = 'navidrome' | 'spotify' | 'deezer' | 'none';
@@ -22,7 +23,8 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 const LIBRARY_KEY = 'runbpm.library';
 const SERVICE_KEY = 'runbpm.service';
 /** Réglages du formulaire conservés pendant l'aller-retour de connexion à Spotify. */
-const SETTINGS_IDS = ['pace', 'speed', 'mode', 'base-cadence', 'uphill', 'downhill', 'tolerance', 'stretch', 'half-time', 'repeat', 'use-tag-bpm', 'm-volume', 'm-overlay', 'keep-awake'];
+// (cadence de base et coefficients de pente sont mémorisés dans le profil coureur)
+const SETTINGS_IDS = ['pace', 'speed', 'mode', 'tolerance', 'stretch', 'half-time', 'repeat', 'use-tag-bpm', 'm-volume', 'm-overlay', 'keep-awake'];
 const PENDING_KEY = 'runbpm.pending';
 
 const state: {
@@ -154,6 +156,23 @@ $('route-sample').addEventListener('click', async () => {
 
 const paceInput = $<HTMLInputElement>('pace');
 const speedInput = $<HTMLInputElement>('speed');
+
+// ---------- Profils coureur et calibrage ----------
+
+const profiles = new ProfilePanel(
+  {
+    select: $<HTMLSelectElement>('profile'),
+    calibration: $('calibration'),
+    hint: $('calibration-hint'),
+    baseCadence: $<HTMLInputElement>('base-cadence'),
+    uphill: $<HTMLInputElement>('uphill'),
+    downhill: $<HTMLInputElement>('downhill'),
+    newBtn: $('profile-new'),
+    renameBtn: $('profile-rename'),
+    deleteBtn: $('profile-delete'),
+  },
+  () => update(),
+);
 
 paceInput.addEventListener('input', () => {
   const pace = parsePace(paceInput.value);
@@ -494,6 +513,8 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   const pace = parsePace(paceInput.value);
   const baseCadenceInput = $<HTMLInputElement>('base-cadence');
   if (pace) baseCadenceInput.placeholder = `auto (≈ ${estimateCadence(3600 / pace)})`;
+  // Profil calibré : la cadence de base affichée suit l'allure choisie.
+  profiles.showCalibratedCadence(pace ? 3600 / pace : undefined);
 
   const errors = [...extraErrors];
   if (!pace) errors.push('Allure invalide : utilisez le format min:s, par exemple 5:30.');
@@ -533,9 +554,11 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   const plan = planRun(sections, {
     targetPace: pace,
     mode: $<HTMLSelectElement>('mode').value as PacingMode,
-    baseCadence: Number.isFinite(baseCadence) ? baseCadence : undefined,
-    uphillSensitivity: numberInput('uphill', 0.6),
-    downhillSensitivity: numberInput('downhill', 0.3),
+    ...(profiles.planOptions(3600 / pace) ?? {
+      baseCadence: Number.isFinite(baseCadence) ? baseCadence : undefined,
+      uphillSensitivity: numberInput('uphill', 0.6),
+      downhillSensitivity: numberInput('downhill', 0.3),
+    }),
   });
   // Les applications de streaming jouent au tempo original ; seul le lecteur interne (Navidrome)
   // peut ajuster la vitesse de lecture.

@@ -27,6 +27,12 @@ export interface PlanOptions {
   downhillSensitivity: number;
   /** Variation de cadence (pas/min) par km/h d'écart à la vitesse cible. */
   speedSensitivity: number;
+  /**
+   * Applique l'effet de la vitesse section par section (et pas seulement sur le plat) : en
+   * « effort constant », la cadence baisse un peu quand on ralentit en montée. Activé par le
+   * calibrage, qui mesure cet effet sur les sorties du coureur.
+   */
+  sectionSpeedEffect?: boolean;
 }
 
 export const DEFAULT_PLAN_OPTIONS: Omit<PlanOptions, 'targetPace'> = {
@@ -114,7 +120,8 @@ export function planRun(sections: Section[], options: Partial<PlanOptions> & { t
     const speed = flatSpeed * factors[k];
     const gradePct = s.grade * 100;
     const slopeDelta = gradePct >= 0 ? gradePct * opts.uphillSensitivity : -gradePct * opts.downhillSensitivity;
-    const cadence = Math.round(clamp(baseCadence + slopeDelta, MIN_CADENCE, MAX_CADENCE));
+    const speedDelta = opts.sectionSpeedEffect ? opts.speedSensitivity * (speed - flatSpeed) * 3.6 : 0;
+    const cadence = Math.round(clamp(baseCadence + speedDelta + slopeDelta, MIN_CADENCE, MAX_CADENCE));
     const duration = s.length / speed;
     const p: PlannedSection = { ...s, speed, pace: 1000 / speed, cadence, startTime: t, endTime: t + duration };
     t += duration;

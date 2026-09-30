@@ -43,19 +43,29 @@
               <option value="effort">Effort constant (plus lent en montée, plus vite en descente)</option>
             </select>
           </label>
+          <label>Coureur
+            <span class="copy-row">
+              <select id="profile" aria-label="Profil coureur"></select>
+              <button type="button" id="profile-new" title="Nouveau profil coureur">Nouveau</button>
+              <button type="button" class="link" id="profile-rename">Renommer</button>
+              <button type="button" class="link danger" id="profile-delete">Supprimer</button>
+            </span>
+          </label>
           <label>Votre cadence sur le plat à cette allure (pas/min)
             <input type="number" id="base-cadence" min="140" max="210" step="1" placeholder="auto" />
           </label>
-          <details>
-            <summary>Réglages avancés</summary>
+          <p id="calibration-hint" class="small muted" hidden></p>
+          <details id="advanced">
+            <summary>Réglages avancés et calibrage</summary>
             <div class="grid2">
               <label>Montée : pas/min par % de pente
-                <input type="number" id="uphill" value="0.6" min="0" max="3" step="0.1" />
+                <input type="number" id="uphill" value="0.6" min="-1" max="3" step="0.1" />
               </label>
               <label>Descente : pas/min par % de pente
-                <input type="number" id="downhill" value="0.3" min="0" max="3" step="0.1" />
+                <input type="number" id="downhill" value="0.3" min="-1" max="3" step="0.1" />
               </label>
             </div>
+            <div id="calibration" class="calibration"></div>
           </details>
         </div>
 

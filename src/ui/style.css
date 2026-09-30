@@ -835,3 +835,43 @@ tr.doubtful td {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------- Profils et calibrage ---------- */
+
+.calibration {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.calib-title {
+  margin: 0 0 6px;
+  font-size: 0.92rem;
+}
+
+.calib-table {
+  margin: 8px 0;
+  font-size: 0.82rem;
+}
+
+.calib-table td {
+  padding: 3px 6px 3px 0;
+  border: 0;
+  white-space: normal;
+  vertical-align: top;
+}
+
+.calib-table td:first-child {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.calib-list {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+input:disabled {
+  opacity: 0.75;
+  cursor: not-allowed;
+}

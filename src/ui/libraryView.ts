@@ -3,10 +3,13 @@ import { normalizeName } from '../core/names';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const MAX_ROWS = 200;
-/** En dessous de cette confiance, le BPM détecté mérite une vérification. */
-export const LOW_CONFIDENCE = 0.5;
+/**
+ * En dessous de cette confiance, le BPM détecté mérite une vérification. Seuils ajustés sur de la
+ * vraie musique (confiances typiques de 20 à 80 %), bien plus basses que sur des sons de synthèse.
+ */
+export const LOW_CONFIDENCE = 0.25;
 /** En dessous, aucune pulsation nette : le morceau est écarté des playlists tant qu'il n'est pas corrigé. */
-export const NO_PULSE = 0.15;
+export const NO_PULSE = 0.05;
 
 const SOURCE_LABEL: Record<NonNullable<Song['bpmSource']>, string> = {
   tag: 'tag',
