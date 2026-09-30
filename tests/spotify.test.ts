@@ -130,7 +130,8 @@ describe('SpotifyAuth', () => {
     const url = new URL(await auth.authorizeUrl('http://127.0.0.1:5173/'));
     expect(url.origin + url.pathname).toBe('https://accounts.spotify.com/authorize');
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');
-    expect(url.searchParams.get('scope')).toContain('streaming');
+    expect(url.searchParams.get('scope')).toContain('playlist-modify-private');
+    expect(url.searchParams.get('scope')).toContain('user-read-playback-state');
     const state = url.searchParams.get('state')!;
 
     await expect(auth.handleRedirect(`?code=C&state=wrong`, 'http://127.0.0.1:5173/')).rejects.toThrow(/état invalide/);
@@ -185,7 +186,7 @@ describe('SpotifyApi', () => {
 
   it('traduit un 403 en message explicite', async () => {
     const { api } = await loggedIn(() => json(403, { error: { message: 'Premium required' } }));
-    const err = await api.pause().catch((e) => e);
+    const err = await api.me().catch((e) => e);
     expect(err).toBeInstanceOf(SpotifyError);
     expect(err.message).toMatch(/Premium/);
   });
@@ -211,12 +212,15 @@ describe('SpotifyApi', () => {
     expect(JSON.parse(String(calls[0].init.body))).toMatchObject({ name: 'Nom', public: false });
   });
 
-  it('pilote la lecture sur un appareil', async () => {
-    const { api, calls } = await loggedIn(() => new Response(null, { status: 204 }));
-    await api.play('dev 1', { uris: ['spotify:track:x'], positionMs: 1500.4 });
-    expect(calls[0].url).toBe('https://api.spotify.com/v1/me/player/play?device_id=dev%201');
-    expect(calls[0].init.method).toBe('PUT');
-    expect(JSON.parse(String(calls[0].init.body))).toEqual({ uris: ['spotify:track:x'], position_ms: 1500 });
+  it('lit l’état du lecteur Spotify', async () => {
+    let playing = true;
+    const { api } = await loggedIn(() =>
+      playing
+        ? json(200, { is_playing: true, progress_ms: 61000, item: { uri: 'spotify:track:x', name: 'N', duration_ms: 200000 } })
+        : new Response(null, { status: 204 }),
+    );
+    expect(await api.playbackState()).toEqual({ uri: 'spotify:track:x', positionMs: 61000, durationMs: 200000, paused: false });
+    playing = false;
     expect(await api.playbackState()).toBeUndefined();
   });
 });

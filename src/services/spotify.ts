@@ -3,22 +3,19 @@
  *
  * - Connexion OAuth « Authorization Code + PKCE » : aucun secret n'est nécessaire, chaque
  *   utilisateur renseigne le Client ID de sa propre application Spotify (mode développement).
- * - Web API : recherche, création de playlist, pilotage de la lecture (Spotify Connect).
- * - Web Playback SDK : lecture directement dans la page (Premium, navigateurs compatibles EME).
+ * - Web API : recherche des morceaux, création de la playlist, lecture de l'état du lecteur
+ *   (pour caler le métronome sur le morceau réellement joué par l'application Spotify).
  *
  * Contraintes Spotify (2026) : compte Premium obligatoire en mode développement, 5 utilisateurs
- * autorisés par application, pas de tempo (audio-features supprimé), pas de réglage de la vitesse
- * de lecture. L'adresse de redirection doit être en HTTPS ou en 127.0.0.1 (« localhost » est refusé).
+ * autorisés par application, pas de tempo (audio-features supprimé). L'adresse de redirection
+ * doit être en HTTPS ou en 127.0.0.1 (« localhost » est refusé).
  */
 
 export const SPOTIFY_ACCOUNTS = 'https://accounts.spotify.com';
 export const SPOTIFY_API = 'https://api.spotify.com/v1';
 export const SPOTIFY_SCOPES = [
-  'streaming',
-  'user-read-email',
-  'user-read-private',
   'user-read-playback-state',
-  'user-modify-playback-state',
+  'user-read-currently-playing',
   'playlist-modify-private',
   'playlist-modify-public',
 ];
@@ -242,13 +239,6 @@ export interface SpotifyTrack {
   durationMs: number;
 }
 
-export interface SpotifyDevice {
-  id: string;
-  name: string;
-  type: string;
-  isActive: boolean;
-}
-
 export interface PlaybackState {
   uri?: string;
   positionMs: number;
@@ -260,9 +250,8 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 function explain(status: number, apiMessage: string): string {
   if (status === 403) {
-    return `Accès refusé par Spotify (${apiMessage}). La lecture exige un compte Premium, et votre compte doit être déclaré dans l’application développeur (User Management).`;
+    return `Accès refusé par Spotify (${apiMessage}). Le mode développement exige un compte Premium, déclaré dans l’application développeur (User Management).`;
   }
-  if (status === 404) return `Introuvable (${apiMessage}). Ouvrez l’application Spotify sur l’appareil choisi, puis réessayez.`;
   return `Spotify : ${apiMessage || `erreur ${status}`}`;
 }
 
@@ -333,30 +322,6 @@ export class SpotifyApi {
     return { id: pl.id, url: pl.external_urls?.spotify ?? `https://open.spotify.com/playlist/${pl.id}` };
   }
 
-  async devices(): Promise<SpotifyDevice[]> {
-    const res = await this.request<{ devices?: RawDevice[] }>('GET', '/me/player/devices');
-    return (res.devices ?? [])
-      .filter((d) => d.id && !d.is_restricted)
-      .map((d) => ({ id: d.id!, name: d.name, type: d.type, isActive: d.is_active }));
-  }
-
-  play(deviceId: string | undefined, opts: { uris?: string[]; positionMs?: number } = {}): Promise<void> {
-    const q = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : '';
-    const body = opts.uris ? { uris: opts.uris, position_ms: Math.max(0, Math.round(opts.positionMs ?? 0)) } : undefined;
-    return this.request('PUT', `/me/player/play${q}`, body);
-  }
-
-  pause(deviceId?: string): Promise<void> {
-    const q = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : '';
-    return this.request('PUT', `/me/player/pause${q}`);
-  }
-
-  seek(positionMs: number, deviceId?: string): Promise<void> {
-    const params = new URLSearchParams({ position_ms: String(Math.max(0, Math.round(positionMs))) });
-    if (deviceId) params.set('device_id', deviceId);
-    return this.request('PUT', `/me/player/seek?${params}`);
-  }
-
   async playbackState(): Promise<PlaybackState | undefined> {
     const s = await this.request<{ is_playing: boolean; progress_ms: number | null; item?: RawTrack | null } | undefined>(
       'GET',
@@ -379,163 +344,9 @@ interface RawTrack {
   artists?: { name: string }[];
 }
 
-interface RawDevice {
-  id: string | null;
-  name: string;
-  type: string;
-  is_active: boolean;
-  is_restricted: boolean;
-}
-
 const toTrack = (t: RawTrack): SpotifyTrack => ({
   uri: t.uri,
   name: t.name,
   artists: (t.artists ?? []).map((a) => a.name),
   durationMs: t.duration_ms,
 });
-
-// ---------- Pilotage de la lecture ----------
-
-/** Cible de lecture : « web » (lecteur intégré à la page) ou identifiant d'un appareil Spotify Connect. */
-export const WEB_PLAYER_TARGET = 'web';
-
-/** Lecture distante utilisée par le lecteur RunBPM (voir RemotePlayback). */
-export class SpotifyRemote {
-  constructor(
-    private readonly api: SpotifyApi,
-    private readonly webPlayer: SpotifyWebPlayer,
-    private readonly target: () => string,
-  ) {}
-
-  activate(): void {
-    if (this.target() === WEB_PLAYER_TARGET) this.webPlayer.activate();
-  }
-
-  async play(uri: string, positionMs: number): Promise<void> {
-    await this.api.play(await this.device(), { uris: [uri], positionMs });
-  }
-
-  async pause(): Promise<void> {
-    await this.api.pause(await this.device());
-  }
-
-  async seek(positionMs: number): Promise<void> {
-    await this.api.seek(positionMs, await this.device());
-  }
-
-  state(): Promise<PlaybackState | undefined> {
-    return this.target() === WEB_PLAYER_TARGET ? this.webPlayer.state() : this.api.playbackState();
-  }
-
-  private device(): Promise<string> {
-    const t = this.target();
-    return t === WEB_PLAYER_TARGET ? this.webPlayer.device() : Promise.resolve(t);
-  }
-}
-
-// ---------- Web Playback SDK ----------
-
-interface SdkPlayer {
-  connect(): Promise<boolean>;
-  disconnect(): void;
-  activateElement?(): Promise<void>;
-  addListener(event: string, cb: (payload: never) => void): boolean;
-  getCurrentState(): Promise<SdkState | null>;
-}
-
-interface SdkState {
-  paused: boolean;
-  position: number;
-  duration: number;
-  track_window: { current_track?: { uri: string } | null };
-}
-
-declare global {
-  interface Window {
-    onSpotifyWebPlaybackSDKReady?: () => void;
-    Spotify?: {
-      Player: new (opts: { name: string; getOAuthToken: (cb: (token: string) => void) => void; volume?: number }) => SdkPlayer;
-    };
-  }
-}
-
-const SDK_URL = 'https://sdk.scdn.co/spotify-player.js';
-
-/** Lecteur Spotify intégré à la page (apparaît comme l'appareil « RunBPM »). */
-export class SpotifyWebPlayer {
-  private player?: SdkPlayer;
-  private deviceId?: Promise<string>;
-
-  constructor(private readonly auth: SpotifyAuth) {}
-
-  /** Charge le SDK et connecte le lecteur ; renvoie l'identifiant d'appareil. */
-  device(): Promise<string> {
-    this.deviceId ??= this.init().catch((e) => {
-      this.deviceId = undefined;
-      throw e;
-    });
-    return this.deviceId;
-  }
-
-  /** À appeler pendant un geste utilisateur (exigence des navigateurs mobiles). */
-  activate(): void {
-    void this.player?.activateElement?.();
-  }
-
-  async state(): Promise<PlaybackState | undefined> {
-    const s = await this.player?.getCurrentState();
-    if (!s) return undefined;
-    return { uri: s.track_window.current_track?.uri, positionMs: s.position, durationMs: s.duration, paused: s.paused };
-  }
-
-  disconnect(): void {
-    this.player?.disconnect();
-    this.player = undefined;
-    this.deviceId = undefined;
-  }
-
-  private async init(): Promise<string> {
-    await loadSdk();
-    const Player = window.Spotify!.Player;
-    const player = new Player({
-      name: 'RunBPM',
-      volume: 0.9,
-      getOAuthToken: (cb) => {
-        this.auth.accessToken().then(cb, () => cb(''));
-      },
-    });
-    this.player = player;
-    return new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Le lecteur Spotify ne répond pas.')), 15_000);
-      const fail = (prefix: string) => (e: { message: string }) => {
-        clearTimeout(timer);
-        reject(new Error(`${prefix} : ${e.message}`));
-      };
-      player.addListener('ready', ((e: { device_id: string }) => {
-        clearTimeout(timer);
-        resolve(e.device_id);
-      }) as (p: never) => void);
-      player.addListener('initialization_error', fail('Navigateur non compatible avec le lecteur Spotify') as (p: never) => void);
-      player.addListener('authentication_error', fail('Authentification Spotify refusée') as (p: never) => void);
-      player.addListener('account_error', fail('Compte Spotify Premium requis') as (p: never) => void);
-      void player.connect();
-    });
-  }
-}
-
-let sdkPromise: Promise<void> | undefined;
-function loadSdk(): Promise<void> {
-  if (window.Spotify) return Promise.resolve();
-  sdkPromise ??= new Promise<void>((resolve, reject) => {
-    window.onSpotifyWebPlaybackSDKReady = () => resolve();
-    const script = document.createElement('script');
-    script.src = SDK_URL;
-    script.async = true;
-    script.onerror = () => {
-      sdkPromise = undefined;
-      reject(new Error('Impossible de charger le lecteur Spotify.'));
-    };
-    document.head.appendChild(script);
-  });
-  return sdkPromise;
-}

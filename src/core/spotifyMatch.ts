@@ -1,4 +1,4 @@
-import { normalizeName } from './audioMatch';
+import { normalizeName } from './names';
 import type { Song } from './library';
 
 /** Résultat de recherche Spotify réduit à ce qui sert à la comparaison. */

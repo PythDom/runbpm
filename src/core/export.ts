@@ -84,3 +84,17 @@ export function toJson(plan: RunPlan, playlist: Playlist, meta: Record<string, u
     2,
   );
 }
+
+/**
+ * Liste « Artiste - Titre », une ligne par morceau : format accepté par les services de transfert
+ * de playlists (TuneMyMusic, Soundiiz…) pour créer la playlist sur Deezer ou un autre service.
+ */
+export function toTransferText(playlist: Playlist): string {
+  return playlist.entries.map((e) => `${e.song.artist} - ${e.song.title}`).join('\n') + '\n';
+}
+
+/** Même liste au format CSV (colonnes titre, artiste). */
+export function toTransferCsv(playlist: Playlist): string {
+  const rows = playlist.entries.map((e) => [e.song.title, e.song.artist]);
+  return [['Track name', 'Artist name'], ...rows].map((r) => r.map(csvField).join(',')).join('\n') + '\n';
+}

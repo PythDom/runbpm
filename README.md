@@ -1,10 +1,14 @@
 # RunBPM
 
-Génère une playlist dont le tempo (BPM) suit la **cadence de course idéale** tout au long d’un parcours,
-en tenant compte du **dénivelé** et de l’**allure désirée**. Le coureur cale ses pas sur la musique et garde
-naturellement la bonne cadence, en montée comme en descente.
+Prépare une playlist dont le tempo (BPM) suit la **cadence de course idéale** tout au long d’un parcours,
+en tenant compte du **dénivelé** et de l’**allure désirée**, puis accompagne la course d’un **métronome**.
 
-Application web 100 % locale : tout est calculé dans le navigateur, aucun fichier n’est envoyé.
+- **À la maison** : RunBPM analyse votre dossier de musique (artiste, titre, **BPM mesuré**), calcule la
+  playlist adaptée au parcours et la crée sur **Spotify** (ou l’exporte pour **Deezer**).
+- **Pendant la course** : la musique est jouée par l’application officielle du service ; RunBPM superpose
+  un métronome au tempo du morceau en cours.
+
+Application web 100 % locale : tout est calculé dans le navigateur, aucun fichier audio n’est envoyé.
 
 ## Démarrage
 
@@ -15,9 +19,28 @@ npm test         # tests unitaires (vitest)
 npm run build    # version statique dans dist/ (déployable telle quelle, ex. GitHub Pages)
 ```
 
-Dans l’application : cliquez sur « Essayer la boucle vallonnée d’exemple » puis « Utiliser la bibliothèque de démo ».
+Essai rapide : « Essayer la boucle vallonnée d’exemple », puis « Bibliothèque de démo ».
 
-## Fonctionnement
+## 1. Bibliothèque : analyse du dossier de musique
+
+« Analyser un dossier de musique » parcourt le dossier (sous-dossiers compris) :
+
+- **Artiste / titre / durée** lus dans les tags — MP3 (ID3v1/v2, durée Xing/VBRI), FLAC, Ogg/Opus,
+  M4A/AAC, WAV — sinon déduits du nom de fichier « Artiste - Titre ».
+- **BPM** : celui des tags s’il existe (option), sinon **mesuré sur le signal** :
+  flux spectral → autocorrélation → peigne sur 4 puis 16 battements (précision ≈ 0,3 BPM).
+  Entre un tempo et son double, on retient le plus proche de 140 BPM (176 plutôt que 88) ; les deux
+  conviennent de toute façon (un pas par temps ou par demi-temps).
+- **Confiance** de la mesure : les morceaux sans pulsation nette sont signalés « à vérifier » ; sans
+  pulsation du tout, ils sont écartés des playlists tant que leur BPM n’est pas corrigé.
+- Les MP3 volumineux ne sont décodés que sur une tranche centrale : quelques centaines de ms par fichier.
+- Les fichiers déjà analysés (même chemin, taille, date) sont ignorés lors d’une nouvelle analyse.
+- Le tableau **Bibliothèque** permet de rechercher, filtrer les morceaux à vérifier, corriger un BPM
+  (saisie, ×2, ÷2) ou retirer un morceau.
+
+L’import CSV/JSON reste possible (voir *Formats d’entrée*).
+
+## 2. Calcul de la playlist
 
 1. **Parcours** → rééchantillonné tous les 20 m, altitude lissée (bruit GPS), puis découpé en
    **sections de pente homogène** (≥ 250 m, voisines de pente similaire fusionnées).
@@ -27,61 +50,50 @@ Dans l’application : cliquez sur « Essayer la boucle vallonnée d’exemple �
      atténué et borné), en conservant l’allure moyenne demandée.
    - Cadence = cadence sur le plat (saisie par le coureur, ou estimée : ≈ 140 + 3 × vitesse en km/h)
      \+ 0,6 pas/min par % de montée, + 0,3 pas/min par % de descente (réglables).
-3. **Playlist** → on avance dans le temps de course et on choisit à chaque fois le morceau dont le tempo
-   colle le mieux à la cadence cible **sur toute sa durée d’écoute** (la cadence peut changer en cours de morceau).
-   - *Mi-tempo* : un morceau à 88 BPM convient pour 176 pas/min (un pas par demi-temps).
-   - *Ajustement de tempo* : vitesse de lecture conseillée, ±4 % max par défaut (quasi inaudible).
-   - Les morceaux naturellement au bon tempo sont préférés ; « Autre proposition » donne une variante.
-4. **Lecteur intégré** (voir ci-dessous) et **exports** : M3U (lecteurs audio), CSV, JSON (plan + playlist).
+3. **Choix des morceaux** → on avance dans le temps de course et on choisit à chaque fois le morceau dont
+   le tempo colle le mieux à la cadence cible **sur toute sa durée d’écoute**. Les services de streaming
+   jouent au tempo original : seuls les morceaux déjà au bon BPM (ou à mi-tempo) sont retenus.
 
-## Lecteur intégré
+## 3. Création sur le service de streaming
 
-- **Associer vos fichiers audio** (ou tout un dossier) : chaque fichier est relié à un morceau de la
-  bibliothèque par son nom : colonne `fichier` de la bibliothèque, sinon « Artiste - Titre », « Titre »…
-  (numéros de piste, accents et casse ignorés). Les fichiers restent sur votre appareil ; il faut les
-  resélectionner après un rechargement de la page.
-- **Ajustement du tempo** : chaque morceau est lu à la vitesse conseillée (`playbackRate`, ±4 % par défaut)
-  **sans changer la hauteur de la voix** (`preservesPitch`).
-- **Métronome** (Web Audio, clics planifiés sur l'horloge audio) :
-  - joue à la place des morceaux sans fichier associé (la bibliothèque de démo est donc jouable telle quelle) ;
-  - peut être superposé à la musique pour trouver le rythme (il n'est pas calé sur les temps du morceau).
-- Affichage en direct : cadence imposée, position estimée sur le parcours (km) et cadence cible à cet endroit.
-- Lecture depuis n'importe quel morceau (clic sur son numéro), barre d'espace = lecture/pause,
-  commandes de l'écran verrouillé et des écouteurs (Media Session).
-- Modifier l'allure, le parcours ou la bibliothèque recalcule la playlist et remet le lecteur au début.
-
-## Spotify (optionnel)
-
-Les morceaux de la bibliothèque peuvent être lus depuis un compte **Spotify Premium**, soit dans
-le navigateur (Web Playback SDK), soit sur un autre appareil via Spotify Connect (typiquement :
-l'application Spotify du téléphone pendant la course, RunBPM servant de télécommande).
+### Spotify
+« Créer la playlist Spotify » cherche chaque morceau sur Spotify (titre, artiste, durée ; seules les
+correspondances sûres sont retenues). Les morceaux **introuvables sont remplacés** et la playlist est
+recalculée, pour que la playlist Spotify corresponde exactement au calcul (sinon la musique et le
+métronome se décaleraient). La playlist est créée en privé dans votre compte.
 
 **Configuration (une fois)** : RunBPM est une page statique sans serveur, chaque utilisateur utilise
 donc sa propre application Spotify :
-1. créer une application sur [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
-   (Web API + Web Playback SDK) ;
-2. y déclarer l'adresse de redirection affichée dans la carte « Spotify » (l'adresse de la page ;
+1. créer une application sur [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) (Web API) ;
+2. y déclarer l’adresse de redirection affichée dans la carte « Streaming » (l’adresse de la page ;
    en local `http://127.0.0.1:5173/`, Spotify refusant `localhost`) ;
 3. dans *User Management*, ajouter les comptes autorisés (5 maximum en mode développement) ;
 4. coller le *Client ID* dans RunBPM et se connecter (OAuth PKCE : aucun secret).
 
-**Fonctionnement**
-- Un morceau est lu via Spotify s'il a un identifiant Spotify (colonne `spotify`, `track uri`, `uri`,
-  ou un lien `open.spotify.com/track/…`) et **aucun fichier local** (le fichier local reste prioritaire).
-- « Lier la bibliothèque à Spotify » recherche les morceaux sans identifiant et ne retient que les
-  correspondances sûres (titre, artiste et durée).
-- **Pas d'ajustement de tempo** : Spotify ne permet pas de modifier la vitesse de lecture. La playlist
-  ne retient donc pour ces morceaux que ceux dont le BPM correspond déjà à la cadence.
-- « Créer dans Spotify » enregistre la playlist (privée) dans le compte, pour courir avec la seule
-  application Spotify.
+Limites imposées par Spotify (2026) : compte Premium obligatoire en mode développement, 5 utilisateurs
+par application, tempo des morceaux non fourni par l’API (d’où l’analyse de vos fichiers).
 
-**Limites imposées par Spotify (2026)** : Premium obligatoire, 5 utilisateurs par application en mode
-développement, tempo des morceaux (audio-features) non fourni par l'API : le BPM doit venir de votre
-bibliothèque. Le lecteur intégré au navigateur n'est pas disponible partout (lecture en arrière-plan
-impossible sur iOS) : sur téléphone, préférez la lecture sur l'application Spotify.
+### Deezer
+Deezer ne permet plus aux applications tierces de créer des playlists (création d’applications
+développeur fermée). « Exporter pour Deezer » télécharge la liste « Artiste - Titre » (une ligne par
+morceau), à importer dans Deezer avec un service de transfert de playlists (TuneMyMusic, Soundiiz…).
+La disponibilité des morceaux sur Deezer ne peut pas être vérifiée : un morceau absent sera sauté.
 
-**Deezer** n'est pas pris en charge : Deezer n'accepte plus la création d'applications développeur et
-son SDK de lecture est abandonné ; aucune lecture complète n'est possible depuis une application tierce.
+### Sans service
+Export M3U pour n’importe quel lecteur de musique (les chemins des fichiers analysés y figurent).
+
+## 4. Pendant la course : le métronome
+
+La carte « Pendant la course » superpose un métronome (Web Audio) au tempo du morceau censé jouer.
+
+- **Spotify connecté** : toutes les 4 s, RunBPM lit le morceau et la position joués par l’application
+  Spotify ; le métronome suit, y compris les sauts de morceau, et se tait pendant les pauses.
+- **Deezer / sans service** : mode chronomètre. Lancez la playlist au premier morceau et appuyez sur
+  Départ au même moment ; ◀ ▶ (ou un clic sur un numéro de la playlist) recalent le métronome.
+- Affichage : morceau attendu, temps de course, km estimé, cadence cible à cet endroit.
+- L’écran est gardé allumé (Wake Lock) : le navigateur mobile coupe sinon l’audio en arrière-plan.
+- Le métronome donne le bon tempo mais n’est pas calé sur les temps du morceau (phase inconnue :
+  l’application n’a pas accès au son joué par Spotify ou Deezer).
 
 ## Formats d’entrée
 
@@ -110,31 +122,37 @@ CSV (séparateur `,` `;` ou tabulation) ou JSON. Colonnes reconnues (FR/EN) :
 
 Les exports de playlists au format *Exportify* (colonnes `Track Name`, `Artist Name(s)`, `Duration (ms)`, `Tempo`)
 sont reconnus directement. Exemple : [`public/samples/bibliotheque-exemple.csv`](public/samples/bibliotheque-exemple.csv).
-La bibliothèque importée est mémorisée dans le navigateur.
+La bibliothèque (analysée ou importée) est mémorisée dans le navigateur.
 
 ## Organisation du code
 
 ```
-src/core/     moteur, sans dépendance au DOM (testé)
-  route.ts      lecture GPX / TCX / JSON, distances (haversine), altitudes manquantes
-  sections.ts   rééchantillonnage, lissage, découpage en sections de pente
-  pacing.ts     plan de course : vitesse, cadence, modèle de Minetti
-  library.ts    import CSV/JSON des morceaux
-  playlist.ts   sélection des morceaux
-  export.ts     M3U / CSV / JSON
-  audioMatch.ts association fichiers audio ↔ morceaux
-  spotifyMatch.ts choix du bon résultat de recherche Spotify
-src/services/spotify.ts   connexion OAuth PKCE, Web API, Web Playback SDK
-  demo.ts       bibliothèque fictive de démonstration
-src/ui/       interface (TypeScript sans framework), graphique SVG,
-              lecteur (player.ts), métronome Web Audio (metronome.ts), carte Spotify (spotifyPanel.ts)
-tests/        tests vitest
+src/core/          moteur, sans dépendance au DOM (testé)
+  route.ts           lecture GPX / TCX / JSON, distances (haversine), altitudes manquantes
+  sections.ts        rééchantillonnage, lissage, découpage en sections de pente
+  pacing.ts          plan de course : vitesse, cadence, modèle de Minetti
+  library.ts         bibliothèque, import CSV/JSON
+  bpm.ts             détection du tempo (flux spectral, autocorrélation, peigne)
+  tags.ts            lecture des tags ID3 / FLAC / Ogg / MP4 / WAV et des durées
+  names.ts           noms de fichiers, normalisation
+  playlist.ts        sélection des morceaux
+  timeline.ts        morceau attendu à un instant donné, recherche par identifiant Spotify
+  spotifyMatch.ts    choix du bon résultat de recherche Spotify
+  export.ts          M3U / CSV / JSON / liste pour transfert (Deezer)
+  demo.ts            bibliothèque fictive de démonstration
+src/services/spotify.ts   connexion OAuth PKCE, recherche, création de playlist, état du lecteur
+src/ui/            interface (TypeScript sans framework)
+  analyzer.ts        analyse des fichiers audio (décodage Web Audio + tags + tempo)
+  libraryView.ts     tableau de la bibliothèque (correction des BPM)
+  companion.ts       compagnon de course (chronomètre / synchro Spotify, Wake Lock)
+  metronome.ts       métronome Web Audio
+  spotifyPanel.ts    connexion Spotify
+  chart.ts           graphique SVG
+tests/             tests vitest (dont signaux et fichiers audio synthétiques)
 scripts/generate-samples.mjs   régénère les fichiers d’exemple
 ```
 
 ## Pistes d’évolution
-- Caler le métronome superposé sur les temps réels du morceau (détection de la phase des battements).
-- Détection automatique du BPM des fichiers audio importés.
-- Connexion à un service de streaming (création de la playlist directement dans le compte).
+- Vérifier la disponibilité des morceaux sur Deezer via son API publique de recherche.
+- Analyse en tâche de fond (Web Worker) pour les très grosses collections.
 - Calibrage personnel de la cadence à partir d’une sortie enregistrée (fichier FIT/TCX avec cadence).
-- Transitions synchronisées sur les changements de section.

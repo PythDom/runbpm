@@ -1,40 +1,36 @@
 import './style.css';
-import { AUDIO_EXTENSIONS, matchAudioFiles } from '../core/audioMatch';
 import { demoLibrary } from '../core/demo';
-import { toCsv, toJson, toM3U } from '../core/export';
+import { toCsv, toJson, toM3U, toTransferText } from '../core/export';
 import { formatDuration, mergeLibraries, parseLibraryFile, type Song } from '../core/library';
 import { cadenceAt, distanceAt, estimateCadence, planRun, type PacingMode, type RunPlan } from '../core/pacing';
 import { generatePlaylist, type Playlist } from '../core/playlist';
 import { parseRouteFile, type Route } from '../core/route';
 import { elevationStats, smoothedProfile, splitSections } from '../core/sections';
+import { analyzeFiles, fileKey } from './analyzer';
 import { renderChart } from './chart';
-import { RunPlayer, type PlayerSnapshot, type PlayerTrack } from './player';
+import { RunCompanion, type CompanionSnapshot } from './companion';
+import { LibraryView, LOW_CONFIDENCE, NO_PULSE } from './libraryView';
 import { SpotifyPanel } from './spotifyPanel';
+
+type Service = 'spotify' | 'deezer' | 'none';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const LIBRARY_KEY = 'runbpm.library';
+const SERVICE_KEY = 'runbpm.service';
+/** Réglages du formulaire conservés pendant l'aller-retour de connexion à Spotify. */
+const SETTINGS_IDS = ['pace', 'speed', 'mode', 'base-cadence', 'uphill', 'downhill', 'tolerance', 'half-time', 'repeat', 'use-tag-bpm', 'm-volume', 'keep-awake'];
+const PENDING_KEY = 'runbpm.pending';
 
 const state: {
   route?: Route;
   library: Song[];
   seed: number;
-  /** Fichiers audio choisis par l'utilisateur (non mémorisés : à resélectionner après rechargement). */
-  audioFiles: File[];
-  /** Fichier audio associé à chaque morceau (par identifiant). */
-  audioBySong: Map<string, File>;
   current?: { plan: RunPlan; playlist: Playlist };
-} = { library: loadLibrary(), seed: 1, audioFiles: [], audioBySong: new Map() };
+  analysis?: { cancelled: boolean };
+} = { library: loadLibrary(), seed: 1 };
 let lastExport: { m3u: string; csv: string; json: string } | undefined;
-let playerSignature = '';
-
-/** Réglages du formulaire conservés pendant l'aller-retour de connexion à Spotify. */
-const SETTINGS_IDS = ['pace', 'speed', 'mode', 'base-cadence', 'uphill', 'downhill', 'tolerance', 'stretch', 'half-time', 'repeat', 'm-fallback', 'm-overlay', 'm-volume'];
-const PENDING_KEY = 'runbpm.pending';
-
-/** Morceau lu via Spotify : pas de fichier local, identifiant Spotify connu, compte connecté. */
-function playsOnSpotify(song: Song): boolean {
-  return spotify.connected && !!song.spotifyUri && !state.audioBySong.has(song.id);
-}
+let companionSignature = '';
+let companionSynced = false;
 
 // ---------- Utilitaires ----------
 
@@ -51,8 +47,12 @@ function saveLibrary(): void {
   try {
     localStorage.setItem(LIBRARY_KEY, JSON.stringify(state.library));
   } catch {
-    /* stockage indisponible : la bibliothèque reste en mémoire */
+    /* stockage indisponible ou plein : la bibliothèque reste en mémoire */
   }
+}
+
+function service(): Service {
+  return $<HTMLSelectElement>('service').value as Service;
 }
 
 function parsePace(text: string): number | undefined {
@@ -94,11 +94,24 @@ function slug(s: string): string {
   return (
     s
       .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[̀-ͯ]/g, '')
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '') || 'parcours'
   );
+}
+
+function playlistName(): string {
+  const pace = parsePace($<HTMLInputElement>('pace').value);
+  return `RunBPM – ${state.route?.name ?? 'course'}${pace ? ` – ${formatPace(pace)}/km` : ''}`;
+}
+
+function setServiceStatus(html: string, kind: 'muted' | 'ok' | 'error' = 'muted', isHtml = false): void {
+  const el = $('service-status');
+  el.hidden = !html;
+  el.className = `small ${kind === 'error' ? 'error-text' : kind === 'muted' ? 'muted' : ''}`;
+  if (isHtml) el.innerHTML = html;
+  else el.textContent = html;
 }
 
 // ---------- Parcours ----------
@@ -154,6 +167,16 @@ speedInput.addEventListener('input', () => {
 
 // ---------- Bibliothèque ----------
 
+const libraryView = new LibraryView(
+  $('library-view'),
+  () => state.library,
+  () => {
+    saveLibrary();
+    renderLibrarySummary();
+    update();
+  },
+);
+
 function renderLibrarySummary(): void {
   const el = $('library-summary');
   const n = state.library.length;
@@ -163,9 +186,20 @@ function renderLibrarySummary(): void {
     return;
   }
   el.classList.remove('muted');
-  const bpms = state.library.map((s) => s.bpm);
+  const running = state.library.filter((s) => s.bpm >= 145 || (s.bpm >= 72 && s.bpm <= 100)).length;
+  const doubtful = state.library.filter((s) => s.confidence !== undefined && s.confidence < LOW_CONFIDENCE).length;
   const total = state.library.reduce((a, s) => a + s.duration, 0);
-  el.innerHTML = `<strong>${n} morceau${n > 1 ? 'x' : ''}</strong> · ${formatDuration(total)} de musique · ${Math.min(...bpms)}–${Math.max(...bpms)} BPM`;
+  el.innerHTML =
+    `<strong>${n} morceau${n > 1 ? 'x' : ''}</strong> · ${formatDuration(total)} de musique<br>` +
+    `${running} au tempo de course (≥ 145 ou 72–100 BPM)` +
+    (doubtful ? ` · <span class="warn-text">${doubtful} à vérifier</span>` : '');
+}
+
+function libraryChanged(): void {
+  saveLibrary();
+  renderLibrarySummary();
+  libraryView.render();
+  update();
 }
 
 $<HTMLInputElement>('library-file').addEventListener('change', async (ev) => {
@@ -186,29 +220,180 @@ $<HTMLInputElement>('library-file').addEventListener('change', async (ev) => {
   input.value = '';
   saveLibrary();
   renderLibrarySummary();
-  rematchAudio();
+  libraryView.render();
   update(errors, warnings);
 });
 
 $('library-demo').addEventListener('click', () => {
   state.library = mergeLibraries(state.library, demoLibrary());
-  saveLibrary();
-  renderLibrarySummary();
-  rematchAudio();
-  update();
+  libraryChanged();
 });
 
 $('library-clear').addEventListener('click', () => {
+  if (state.library.length > 20 && !confirm(`Retirer les ${state.library.length} morceaux de la bibliothèque ?`)) return;
   state.library = [];
-  saveLibrary();
-  renderLibrarySummary();
-  rematchAudio();
+  libraryChanged();
+});
+
+// ---------- Analyse des fichiers audio ----------
+
+async function analyze(list: FileList | null): Promise<void> {
+  const files = Array.from(list ?? []);
+  if (files.length === 0 || state.analysis) return;
+  const signal = { cancelled: false };
+  state.analysis = signal;
+  const box = $('analysis');
+  const bar = $<HTMLProgressElement>('analysis-bar');
+  const text = $('analysis-text');
+  box.hidden = false;
+  const known = new Set(state.library.map((s) => s.fileKey).filter((k): k is string => !!k));
+  const skipped = files.filter((f) => known.has(fileKey(f))).length;
+  let sinceSave = 0;
+  const started = performance.now();
+
+  const { progress, errors } = await analyzeFiles(
+    files,
+    known,
+    { useTagBpm: $<HTMLInputElement>('use-tag-bpm').checked },
+    (song) => {
+      state.library = mergeLibraries(state.library, [song]);
+      if (++sinceSave >= 20) {
+        sinceSave = 0;
+        saveLibrary();
+        renderLibrarySummary();
+      }
+    },
+    (p) => {
+      bar.max = Math.max(1, p.total);
+      bar.value = p.done;
+      const elapsed = (performance.now() - started) / 1000;
+      const eta = p.done > 2 ? (elapsed / p.done) * (p.total - p.done) : undefined;
+      text.textContent =
+        `${p.done}/${p.total} fichier(s) analysé(s)` +
+        (eta !== undefined && p.done < p.total ? ` · environ ${formatDuration(eta)} restant` : '') +
+        (p.current ? ` · ${p.current}` : '');
+    },
+    signal,
+  );
+
+  state.analysis = undefined;
+  box.hidden = true;
+  libraryChanged();
+  const summary =
+    `Analyse ${signal.cancelled ? 'interrompue' : 'terminée'} : ${progress.added} morceau(x) ajouté(s)` +
+    (skipped ? `, ${skipped} déjà connu(s)` : '') +
+    (progress.failed ? `, ${progress.failed} fichier(s) ignoré(s)` : '') +
+    '.';
+  const details = errors.slice(0, 5).join(' ; ') + (errors.length > 5 ? ` ; … (${errors.length - 5} autres)` : '');
+  showMessages([], errors.length ? [summary, `Fichiers ignorés : ${details}`] : [summary]);
+}
+
+for (const id of ['audio-folder', 'audio-files']) {
+  $<HTMLInputElement>(id).addEventListener('change', (ev) => {
+    const input = ev.target as HTMLInputElement;
+    void analyze(input.files).finally(() => (input.value = ''));
+  });
+}
+$('analysis-stop').addEventListener('click', () => {
+  if (state.analysis) state.analysis.cancelled = true;
+});
+
+// ---------- Streaming ----------
+
+const spotify = new SpotifyPanel($('spotify-panel'), {
+  onConnectionChange: () => update(),
+  beforeRedirect: () => {
+    // La connexion quitte la page : on garde le parcours et les réglages pour le retour.
+    try {
+      const settings = Object.fromEntries(
+        SETTINGS_IDS.map((id) => {
+          const el = $<HTMLInputElement>(id);
+          return [id, el.type === 'checkbox' ? el.checked : el.value];
+        }),
+      );
+      sessionStorage.setItem(PENDING_KEY, JSON.stringify({ route: state.route, settings }));
+    } catch {
+      /* stockage indisponible : il faudra recharger le parcours */
+    }
+  },
+});
+
+function renderService(): void {
+  const s = service();
+  $('spotify-panel').hidden = s !== 'spotify';
+  $('deezer-panel').hidden = s !== 'deezer';
+  $('none-panel').hidden = s !== 'none';
+  try {
+    localStorage.setItem(SERVICE_KEY, s);
+  } catch {
+    /* préférence non mémorisée */
+  }
+}
+
+$('service').addEventListener('change', () => {
+  renderService();
+  setServiceStatus('');
   update();
+});
+
+/**
+ * Crée la playlist Spotify. Les morceaux de la playlist sont cherchés sur Spotify ; ceux qui en sont
+ * absents sont exclus et la playlist est recalculée, jusqu'à ce qu'elle soit entièrement disponible
+ * (sinon la musique et le métronome se décaleraient pendant la course).
+ */
+async function createSpotifyPlaylist(): Promise<void> {
+  const btn = $<HTMLButtonElement>('create-spotify');
+  btn.disabled = true;
+  try {
+    for (let round = 0; round < 10; round++) {
+      update();
+      const current = state.current;
+      if (!current) throw new Error('Aucune playlist à créer.');
+      const missing = [...new Set(current.playlist.entries.map((e) => e.song))].filter((s) => !s.spotifyUri);
+      if (missing.length === 0) {
+        setServiceStatus('Création de la playlist dans votre compte Spotify…');
+        const url = await spotify.createPlaylist(
+          current.playlist,
+          playlistName(),
+          `Cadence ≈ ${current.plan.baseCadence} pas/min. Générée par RunBPM.`,
+        );
+        setServiceStatus(
+          `Playlist créée (${current.playlist.entries.length} morceaux) : <a href="${esc(url)}" target="_blank" rel="noopener">ouvrir dans Spotify</a>. ` +
+            'Le jour de la course : lancez-la depuis l’application Spotify, puis appuyez sur Départ ci-dessus.',
+          'ok',
+          true,
+        );
+        return;
+      }
+      await spotify.linkSongs(missing, (done, total) =>
+        setServiceStatus(`Recherche des morceaux sur Spotify : ${done}/${total}${round > 0 ? ' (remplacement des morceaux introuvables)' : ''}…`),
+      );
+      saveLibrary();
+    }
+    throw new Error('Trop de morceaux introuvables sur Spotify : élargissez la bibliothèque ou la tolérance.');
+  } catch (e) {
+    setServiceStatus((e as Error).message, 'error');
+  } finally {
+    btn.disabled = false;
+    update();
+  }
+}
+
+$('create-spotify').addEventListener('click', () => void createSpotifyPlaylist());
+
+$('export-deezer').addEventListener('click', () => {
+  if (!state.current) return;
+  download(`${base()}-deezer.txt`, toTransferText(state.current.playlist), 'text/plain');
+  setServiceStatus(
+    'Liste téléchargée (« Artiste - Titre », une ligne par morceau). Importez-la dans Deezer avec un service de transfert ' +
+      '(TuneMyMusic, Soundiiz…) en conservant l’ordre, puis lancez la playlist et appuyez sur Départ au même moment.',
+    'ok',
+  );
 });
 
 // ---------- Calcul et rendu ----------
 
-for (const id of ['mode', 'base-cadence', 'uphill', 'downhill', 'tolerance', 'stretch', 'half-time', 'repeat']) {
+for (const id of ['mode', 'base-cadence', 'uphill', 'downhill', 'tolerance', 'half-time', 'repeat']) {
   $(id).addEventListener('input', () => update());
   $(id).addEventListener('change', () => update());
 }
@@ -225,12 +410,16 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
 
   const errors = [...extraErrors];
   if (!pace) errors.push('Allure invalide : utilisez le format min:s, par exemple 5:30.');
-  if (!state.route || state.library.length === 0 || !pace) {
+  const svc = service();
+  // On écarte les morceaux sans pulsation détectée et, pour Spotify, ceux qu'il ne propose pas.
+  const notFound = svc === 'spotify' ? spotify.notFound() : new Set<string>();
+  const library = state.library.filter((s) => !notFound.has(s.id) && !(s.confidence !== undefined && s.confidence < NO_PULSE));
+
+  if (!state.route || library.length === 0 || !pace) {
     $('results').hidden = true;
     lastExport = undefined;
     state.current = undefined;
-    loadPlayer([]);
-    renderAudioSummary();
+    loadCompanion(undefined);
     showMessages(errors, extraWarnings);
     return;
   }
@@ -246,14 +435,13 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
     uphillSensitivity: numberInput('uphill', 0.6),
     downhillSensitivity: numberInput('downhill', 0.3),
   });
-  const playlist = generatePlaylist(plan, state.library, {
+  // Les applications de streaming jouent au tempo original : aucun ajustement de vitesse.
+  const playlist = generatePlaylist(plan, library, {
     tolerance,
-    maxStretch: numberInput('stretch', 4) / 100,
+    maxStretch: 0,
     allowHalfTime: $<HTMLInputElement>('half-time').checked,
     allowRepeat: $<HTMLInputElement>('repeat').checked,
     seed: state.seed,
-    // Spotify ne permet pas de changer la vitesse de lecture.
-    canStretch: (song) => !playsOnSpotify(song),
   });
 
   showMessages(errors, [...extraWarnings, ...playlist.warnings]);
@@ -278,19 +466,17 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   $('playlist').querySelector('tbody')!.innerHTML = playlist.entries
     .map((e, i) => {
       const ok = e.error <= tolerance + 1e-9;
-      const rate = e.playbackRate === 1 ? '—' : `${e.playbackRate > 1 ? '+' : ''}${((e.playbackRate - 1) * 100).toFixed(1)} %`;
-      const audioTag = state.audioBySong.has(e.song.id)
-        ? ' <span class="tag audio" title="Fichier audio associé">♪ audio</span>'
-        : playsOnSpotify(e.song)
-          ? ' <span class="tag spotify" title="Lu via Spotify (tempo original)">Spotify</span>'
-          : '';
+      const tags = [
+        svc === 'spotify' && e.song.spotifyUri ? '<span class="tag spotify" title="Trouvé sur Spotify">Spotify</span>' : '',
+        e.song.confidence !== undefined && e.song.confidence < LOW_CONFIDENCE ? '<span class="tag warn" title="BPM détecté avec une confiance faible">à vérifier</span>' : '',
+        e.repeated ? '<span class="tag">bis</span>' : '',
+      ].join(' ');
       return `<tr class="${ok ? '' : 'off'}" data-i="${i}">
-        <td><button type="button" class="row-play" data-i="${i}" aria-label="Lire le morceau ${i + 1}" title="Lire à partir d’ici">${i + 1}</button></td>
+        <td><button type="button" class="row-play" data-i="${i}" aria-label="Recaler le métronome sur le morceau ${i + 1}" title="Recaler le métronome sur ce morceau">${i + 1}</button></td>
         <td>${formatDuration(e.startTime)}</td>
         <td>${km(distanceAt(plan, e.startTime), 1)}</td>
-        <td><div class="song-title">${esc(e.song.title)}${e.repeated ? ' <span class="tag">bis</span>' : ''}</div><div class="muted small">${esc(e.song.artist)}${audioTag}</div></td>
+        <td><div class="song-title">${esc(e.song.title)}</div><div class="muted small">${esc(e.song.artist)} ${tags}</div></td>
         <td class="num">${e.song.bpm}${e.multiplier === 2 ? ' <span class="tag" title="Un pas par demi-temps">×2</span>' : ''}</td>
-        <td class="num">${rate}</td>
         <td class="num strong">${e.effectiveCadence}</td>
         <td class="num">${e.targetCadence}</td>
       </tr>`;
@@ -310,188 +496,108 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
     )
     .join('');
 
-  loadPlayer(
-    playlist.entries.map((entry) => ({
-      entry,
-      file: state.audioBySong.get(entry.song.id),
-      spotifyUri: playsOnSpotify(entry.song) ? entry.song.spotifyUri : undefined,
-    })),
-  );
-  $('export-spotify').hidden = !spotify.connected;
-  renderPlayer(player.snapshot());
-  renderAudioSummary();
+  $('create-spotify').hidden = svc !== 'spotify' || !spotify.connected;
+  $('export-deezer').hidden = svc !== 'deezer';
+  loadCompanion(playlist);
+  const syncWanted = svc === 'spotify' && spotify.connected;
+  if (syncWanted !== companionSynced) {
+    companionSynced = syncWanted;
+    companion.setSync(syncWanted ? spotify.syncSource : undefined);
+  }
+  renderRun(companion.snapshot());
 
-  const title = `RunBPM – ${route.name} – ${formatPace(pace)}/km`;
   lastExport = {
-    m3u: toM3U(playlist, title),
+    m3u: toM3U(playlist, playlistName()),
     csv: toCsv(playlist),
     json: toJson(plan, playlist, { route: route.name, targetPace: formatPace(pace) }),
   };
 }
 
-// ---------- Lecteur ----------
+// ---------- Pendant la course ----------
 
-const player = new RunPlayer((snap) => renderPlayer(snap));
-const seekInput = $<HTMLInputElement>('p-seek');
-let seeking = false;
+const companion = new RunCompanion((snap) => renderRun(snap));
 
-/** Recharge le lecteur seulement si la playlist ou les fichiers associés ont changé. */
-function loadPlayer(tracks: PlayerTrack[]): void {
-  const signature = tracks
-    .map((t) => `${t.entry.song.id}@${t.entry.playbackRate}:${t.file ? `${t.file.name}/${t.file.size}` : ''}:${t.spotifyUri ?? ''}`)
-    .join('|');
-  if (signature === playerSignature) return;
-  playerSignature = signature;
-  player.load(tracks);
+/** Recharge le compagnon seulement si la playlist a changé (évite de l'arrêter en pleine course). */
+function loadCompanion(playlist: Playlist | undefined): void {
+  const signature = playlist ? playlist.entries.map((e) => `${e.song.id}@${e.startTime.toFixed(1)}`).join('|') : '';
+  if (signature === companionSignature) return;
+  companionSignature = signature;
+  companion.setPlaylist(playlist);
 }
 
-function rematchAudio(): void {
-  const matches = matchAudioFiles(
-    state.library,
-    state.audioFiles.map((f) => f.webkitRelativePath || f.name),
-  );
-  state.audioBySong = new Map([...matches].map(([id, i]) => [id, state.audioFiles[i]]));
-}
+const SYNC_LABEL: Record<CompanionSnapshot['sync'], string> = {
+  timer: 'Mode chronomètre',
+  synced: 'Synchronisé avec Spotify',
+  paused: 'Spotify en pause',
+  'other-track': 'Spotify joue un morceau hors playlist',
+  'no-playback': 'En attente de lecture sur Spotify',
+  error: 'Spotify injoignable : mode chronomètre',
+};
 
-function renderAudioSummary(): void {
-  const el = $('player-assoc');
-  if (state.audioFiles.length === 0) {
-    el.textContent = spotify.connected
-      ? 'Aucun fichier audio : morceaux liés lus via Spotify, les autres au métronome.'
-      : 'Aucun fichier audio : le métronome donne la cadence.';
-    return;
-  }
-  const inPlaylist = state.current?.playlist.entries.filter((e) => state.audioBySong.has(e.song.id)).length ?? 0;
-  const total = state.current?.playlist.entries.length ?? 0;
-  const unmatched = state.audioFiles.length - state.audioBySong.size;
-  el.textContent =
-    `${state.audioBySong.size} fichier(s) associé(s) à la bibliothèque` +
-    (total ? ` · ${inPlaylist}/${total} morceaux de la playlist` : '') +
-    (unmatched ? ` · ${unmatched} sans correspondance` : '');
-}
+function renderRun(snap: CompanionSnapshot): void {
+  const current = state.current;
+  const toggle = $('run-toggle');
+  toggle.classList.toggle('playing', snap.running);
+  toggle.setAttribute('aria-label', snap.running ? 'Pause' : 'Départ');
+  $('run-sync').textContent = SYNC_LABEL[snap.sync];
+  $('run-help').textContent =
+    snap.sync === 'timer' || snap.sync === 'error'
+      ? 'Lancez la playlist au premier morceau et appuyez sur Départ au même moment. Si un morceau est sauté, recalez avec ◀ ▶.'
+      : 'Lancez la playlist dans l’application Spotify et appuyez sur Départ : le métronome suit le morceau joué, même en cas de saut ou de pause.';
+  $('run-time').textContent = formatDuration(snap.runTime);
 
-function addAudioFiles(list: FileList | null): void {
-  const files = Array.from(list ?? []).filter((f) => f.type.startsWith('audio/') || AUDIO_EXTENSIONS.test(f.name));
-  const key = (f: File) => `${f.webkitRelativePath || f.name}/${f.size}`;
-  const known = new Set(state.audioFiles.map(key));
-  state.audioFiles = [...state.audioFiles, ...files.filter((f) => !known.has(key(f)))];
-  rematchAudio();
-  update();
-}
-
-for (const id of ['audio-files', 'audio-folder']) {
-  $<HTMLInputElement>(id).addEventListener('change', (ev) => {
-    const input = ev.target as HTMLInputElement;
-    addAudioFiles(input.files);
-    input.value = '';
-  });
-}
-
-function renderPlayer(snap: PlayerSnapshot): void {
-  $('p-play').classList.toggle('playing', snap.playing);
-  $('p-play').setAttribute('aria-label', snap.playing ? 'Pause' : 'Lecture');
-  const entry = state.current?.playlist.entries[snap.index];
-  const plan = state.current?.plan;
-
-  if (!entry || !plan) {
-    $('p-title').textContent = '—';
-    $('p-sub').innerHTML = '&nbsp;';
-    $('p-cad').textContent = '—';
+  const entry = current && snap.index >= 0 ? current.playlist.entries[snap.index] : undefined;
+  if (!current || !entry) {
+    $('run-title').textContent = current && snap.index < 0 && snap.runTime > 0 ? 'Playlist terminée' : '—';
+    $('run-sub').innerHTML = '&nbsp;';
+    $('run-cad').textContent = '—';
+    $('run-km').textContent = '';
   } else {
-    $('p-title').textContent = `${snap.index + 1}. ${entry.song.title}`;
-    const source =
-      snap.mode === 'audio'
-        ? 'fichier audio'
-        : snap.mode === 'spotify'
-          ? 'Spotify'
-          : snap.mode === 'metronome'
-            ? 'métronome (pas de fichier)'
-            : 'ignoré (pas de fichier)';
-    const rate = entry.playbackRate === 1 ? 'tempo original' : `tempo ${entry.playbackRate > 1 ? '+' : ''}${((entry.playbackRate - 1) * 100).toFixed(1)} %`;
-    $('p-sub').textContent = `${entry.song.artist} · ${entry.song.bpm} BPM${entry.multiplier === 2 ? ' ×2' : ''} · ${rate} · ${source}`;
-    $('p-cad').textContent = String(Math.round(entry.effectiveCadence));
-    const runTime = entry.startTime + snap.position;
-    const done = runTime >= plan.totalTime;
-    $('p-run').textContent = done
-      ? 'Arrivée !'
-      : `km ${km(distanceAt(plan, runTime), 1)} · cible ${cadenceAt(plan, runTime)} pas/min`;
+    $('run-title').textContent = `${snap.index + 1}. ${entry.song.title}`;
+    $('run-sub').textContent = `${entry.song.artist} · ${entry.song.bpm} BPM${entry.multiplier === 2 ? ' (un pas par demi-temps)' : ''}`;
+    $('run-cad').textContent = String(Math.round(entry.effectiveCadence));
+    const d = distanceAt(current.plan, snap.runTime);
+    $('run-km').textContent = snap.runTime >= current.plan.totalTime ? 'Arrivée !' : `km ${km(d, 1)} · cible ${cadenceAt(current.plan, snap.runTime)} pas/min`;
   }
-  $('p-pos').textContent = formatDuration(snap.position);
-  $('p-dur').textContent = formatDuration(snap.duration);
-  if (!seeking) seekInput.value = String(snap.duration > 0 ? Math.round((snap.position / snap.duration) * 1000) : 0);
-
-  const err = $('p-error');
-  err.hidden = !snap.error;
-  err.textContent = snap.error ?? '';
+  $('run-cad').classList.toggle('silent', !snap.clicking);
 
   for (const row of $('playlist').querySelectorAll<HTMLTableRowElement>('tbody tr')) {
-    row.classList.toggle('current', Number(row.dataset.i) === snap.index && (snap.playing || snap.position > 0));
+    row.classList.toggle('current', Number(row.dataset.i) === snap.index && (snap.running || snap.runTime > 0));
   }
 }
 
-$('p-play').addEventListener('click', () => player.toggle());
-$('p-next').addEventListener('click', () => player.next());
-$('p-prev').addEventListener('click', () => player.previous());
-seekInput.addEventListener('input', () => (seeking = true));
-seekInput.addEventListener('change', () => {
-  seeking = false;
-  player.seek(Number(seekInput.value) / 1000);
-});
+$('run-toggle').addEventListener('click', () => companion.toggle());
+$('run-next').addEventListener('click', () => companion.next());
+$('run-prev').addEventListener('click', () => companion.previous());
+$('run-reset').addEventListener('click', () => companion.reset());
 $('playlist').addEventListener('click', (ev) => {
   const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button.row-play');
-  if (btn) player.jump(Number(btn.dataset.i));
+  if (btn) companion.jumpTo(Number(btn.dataset.i));
 });
 
-function syncPlayerOptions(): void {
-  player.setOptions({
-    metronomeFallback: $<HTMLInputElement>('m-fallback').checked,
-    metronomeOverlay: $<HTMLInputElement>('m-overlay').checked,
-    metronomeVolume: Number($<HTMLInputElement>('m-volume').value) / 100,
-  });
+function syncCompanionOptions(): void {
+  companion.metronome.setVolume(Number($<HTMLInputElement>('m-volume').value) / 100);
+  companion.keepScreenOn = $<HTMLInputElement>('keep-awake').checked;
 }
-for (const id of ['m-fallback', 'm-overlay', 'm-volume']) $(id).addEventListener('input', syncPlayerOptions);
-syncPlayerOptions();
+for (const id of ['m-volume', 'keep-awake']) $(id).addEventListener('input', syncCompanionOptions);
+syncCompanionOptions();
 
-// Barre d'espace = lecture / pause (hors champs de saisie).
+// Barre d'espace = départ / pause (hors champs de saisie).
 document.addEventListener('keydown', (ev) => {
   const target = ev.target as HTMLElement;
-  if (ev.code !== 'Space' || $('results').hidden || target.closest('input, select, textarea, button')) return;
+  if (ev.code !== 'Space' || $('results').hidden || target.closest('input, select, textarea, button, summary')) return;
   ev.preventDefault();
-  player.toggle();
+  companion.toggle();
 });
+
+// ---------- Exports ----------
 
 const base = () => `runbpm-${slug(state.route?.name ?? 'parcours')}`;
 $('export-m3u').addEventListener('click', () => lastExport && download(`${base()}.m3u`, lastExport.m3u, 'audio/x-mpegurl'));
 $('export-csv').addEventListener('click', () => lastExport && download(`${base()}.csv`, lastExport.csv, 'text/csv'));
 $('export-json').addEventListener('click', () => lastExport && download(`${base()}.json`, lastExport.json, 'application/json'));
 
-// ---------- Spotify ----------
-
-const spotify = new SpotifyPanel($('spotify-card'), {
-  onConnectionChange: () => {
-    player.setRemote(spotify.remote);
-    update();
-  },
-  getLibrary: () => state.library,
-  onLibraryChanged: () => {
-    saveLibrary();
-    update();
-  },
-  beforeRedirect: () => {
-    // La connexion quitte la page : on garde le parcours et les réglages pour le retour.
-    try {
-      const settings = Object.fromEntries(
-        SETTINGS_IDS.map((id) => {
-          const el = $<HTMLInputElement>(id);
-          return [id, el.type === 'checkbox' ? el.checked : el.value];
-        }),
-      );
-      sessionStorage.setItem(PENDING_KEY, JSON.stringify({ route: state.route, settings }));
-    } catch {
-      /* stockage indisponible : il faudra recharger le parcours */
-    }
-  },
-});
+// ---------- Démarrage ----------
 
 function restorePending(): void {
   try {
@@ -505,42 +611,22 @@ function restorePending(): void {
       if (el.type === 'checkbox') el.checked = value === true;
       else el.value = String(value);
     }
-    syncPlayerOptions();
+    syncCompanionOptions();
     if (route?.points?.length) setRoute(route);
   } catch {
     /* rien à restaurer */
   }
 }
 
-$('export-spotify').addEventListener('click', async () => {
-  const status = $('spotify-export-status');
-  const current = state.current;
-  const pace = parsePace(paceInput.value);
-  if (!current || !state.route || !pace) return;
-  const btn = $<HTMLButtonElement>('export-spotify');
-  btn.disabled = true;
-  status.hidden = false;
-  status.className = 'small muted';
-  status.textContent = 'Création de la playlist…';
-  try {
-    const name = `RunBPM – ${state.route.name} – ${formatPace(pace)}/km`;
-    const description = `Cadence ${current.plan.baseCadence} pas/min environ, générée par RunBPM.`;
-    const res = await spotify.exportPlaylist(current.playlist, name, description);
-    status.className = 'small';
-    status.innerHTML =
-      `Playlist créée avec ${res.added} morceau(x) : <a href="${esc(res.url)}" target="_blank" rel="noopener">ouvrir dans Spotify</a>.` +
-      (res.missing ? ` ${res.missing} morceau(x) non liés à Spotify n’y figurent pas.` : '') +
-      ' Dans l’application Spotify, les morceaux sont joués au tempo original.';
-  } catch (e) {
-    status.className = 'small error-text';
-    status.textContent = (e as Error).message;
-  } finally {
-    btn.disabled = false;
-  }
-});
-
+try {
+  const saved = localStorage.getItem(SERVICE_KEY);
+  if (saved === 'spotify' || saved === 'deezer' || saved === 'none') $<HTMLSelectElement>('service').value = saved;
+} catch {
+  /* préférence indisponible */
+}
+renderService();
 renderLibrarySummary();
-rematchAudio();
+libraryView.render();
 restorePending();
 update();
 void spotify.init();

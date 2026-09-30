@@ -527,7 +527,8 @@ label.file.compact {
   font-size: 0.9rem;
 }
 
-.now {
+.now,
+.run-main {
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 16px;
@@ -665,7 +666,8 @@ tr.current button.row-play {
 }
 
 @media (max-width: 560px) {
-  .now {
+  .now,
+  .run-main {
     grid-template-columns: 1fr auto;
   }
   .now-info {
@@ -741,4 +743,88 @@ progress {
 
 #spotify-export-status {
   margin: 0 0 8px;
+}
+
+/* ---------- Analyse, bibliothèque, course ---------- */
+
+.analysis {
+  margin-top: 10px;
+}
+
+.analysis p {
+  margin: 4px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-view {
+  margin-bottom: 16px;
+}
+
+.library-view > summary .muted {
+  margin-left: 6px;
+}
+
+.lib-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+}
+
+.lib-tools input[type='search'] {
+  flex: 1 1 240px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.lib-tools label.check {
+  margin: 0;
+}
+
+input.bpm-edit {
+  width: 64px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.lib-table td.actions {
+  white-space: nowrap;
+}
+
+.lib-table td.actions button:not(.link) {
+  padding: 2px 8px;
+}
+
+.lib-table td.actions button.link {
+  margin-left: 6px;
+}
+
+tr.doubtful td {
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+
+.tag.warn {
+  background: color-mix(in srgb, var(--warn) 22%, transparent);
+  color: var(--text);
+}
+
+.now-cad .value.silent {
+  opacity: 0.45;
+}
+
+.times button.link {
+  font-size: inherit;
 }

@@ -15,8 +15,14 @@ export interface Song {
   duration: number;
   /** Chemin ou URL du fichier audio, repris dans l'export M3U. */
   file?: string;
-  /** Identifiant Spotify du morceau (spotify:track:…), pour la lecture via Spotify. */
+  /** Identifiant Spotify du morceau (spotify:track:…). */
   spotifyUri?: string;
+  /** Origine du BPM : tag du fichier, analyse du signal, import CSV/JSON ou correction manuelle. */
+  bpmSource?: 'tag' | 'analyse' | 'import' | 'manuel';
+  /** Confiance de l'analyse (0 à 1). */
+  confidence?: number;
+  /** Empreinte du fichier analysé (chemin, taille, date) : évite de le réanalyser. */
+  fileKey?: string;
 }
 
 export interface LibraryImport {
@@ -24,7 +30,7 @@ export interface LibraryImport {
   warnings: string[];
 }
 
-const COLUMN_ALIASES: Record<keyof Omit<Song, 'id'>, string[]> = {
+const COLUMN_ALIASES: Record<'title' | 'artist' | 'bpm' | 'duration' | 'file' | 'spotifyUri', string[]> = {
   spotifyUri: ['spotify', 'spotify uri', 'spotify_uri', 'spotify id', 'spotify url', 'track uri', 'uri'],
   title: ['title', 'titre', 'track name', 'track', 'name', 'nom', 'song', 'chanson', 'morceau'],
   artist: ['artist', 'artiste', 'artist name(s)', 'artist name', 'artists', 'artistes', 'interprete', 'interprète'],
@@ -144,6 +150,7 @@ function validate(partial: Partial<Song>, line: number, warnings: string[]): Son
     title: partial.title?.trim() || 'Sans titre',
     artist: partial.artist?.trim() || 'Artiste inconnu',
     bpm: Math.round(partial.bpm * 10) / 10,
+    bpmSource: 'import',
     duration: Math.round(partial.duration),
     file: fileAsSpotify ? undefined : partial.file?.trim() || undefined,
     spotifyUri: normalizeSpotifyUri(partial.spotifyUri) ?? fileAsSpotify,
