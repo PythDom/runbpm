@@ -176,6 +176,8 @@
           <div class="player-options">
             <label class="check" id="overlay-row"><input type="checkbox" id="m-overlay" /> Superposer le métronome à la musique</label>
             <label class="volume">Volume du métronome <input type="range" id="m-volume" min="0" max="100" value="60" /></label>
+            <label class="volume" id="offset-row" title="Si les clics semblent en avance ou en retard sur la musique (écouteurs Bluetooth notamment)">Décalage des clics
+              <input type="range" id="m-offset" min="-150" max="150" step="5" value="0" /><span id="m-offset-val" class="small muted">0 ms</span></label>
             <label class="check"><input type="checkbox" id="keep-awake" checked /> Garder l’écran allumé</label>
           </div>
         </div>

@@ -31,7 +31,11 @@ Essai rapide : « Essayer la boucle vallonnée d’exemple », puis « Biblioth�
 - **Artiste / titre / durée** lus dans les tags — MP3 (ID3v1/v2, durée Xing/VBRI), FLAC, Ogg/Opus,
   M4A/AAC, WAV — sinon déduits du nom de fichier « Artiste - Titre ».
 - **BPM** : celui des tags s’il existe (option), sinon **mesuré sur le signal** :
-  flux spectral → autocorrélation → peigne sur 4 puis 16 battements (précision ≈ 0,3 BPM).
+  flux spectral → autocorrélation → peigne sur 4 puis 16 battements, puis affinage par le suivi des
+  temps (régression sur les temps détectés). Évalué sur 7 vrais morceaux libres face à madmom
+  (référence de la recherche) : tempo exact à ±0,6 % sur toutes les musiques à tempo régulier
+  (un morceau ressort au double, ce qui reste utilisable) ; les musiques au tempo fluctuant
+  (orchestre, rubato) restent approximatives.
   Entre un tempo et son double, on retient le plus proche de 140 BPM (176 plutôt que 88) ; les deux
   conviennent de toute façon (un pas par temps ou par demi-temps).
 - **Confiance** de la mesure : les morceaux sans pulsation nette sont signalés « à vérifier » ; sans
@@ -90,6 +94,12 @@ Pour un serveur auto-hébergé compatible Subsonic / OpenSubsonic (Navidrome, Go
 - **Lecture** : fichier d’origine diffusé par le serveur, vitesse de lecture ajustée (± « Tempo ajustable »,
   4 % par défaut, `preservesPitch`), barre de position, morceau suivant / précédent, commandes de l’écran
   verrouillé (Media Session), métronome superposable.
+- **Métronome calé sur les temps** : chaque morceau est décodé et ses temps repérés (suivi des temps par
+  programmation dynamique, Ellis 2007 ; ±6 ms des temps annotés par madmom sur de vrais morceaux) ; les
+  clics sont planifiés sur ces temps d’après la position de lecture et la vitesse ajustée, y compris après
+  un déplacement dans le morceau. Un réglage « Décalage des clics » (±150 ms, mémorisé par appareil)
+  compense la latence audio (écouteurs Bluetooth…). Tant que les temps ne sont pas repérés, le
+  métronome bat librement.
 - **« Créer la playlist dans Navidrome »** : pour l’écouter aussi depuis vos autres applications Subsonic
   (au tempo original, l’ajustement n’existant que dans RunBPM).
 - Navidrome autorise les appels depuis n’importe quelle page (CORS). Si RunBPM est servi en HTTPS, le
@@ -131,8 +141,8 @@ La carte « Pendant la course » superpose un métronome (Web Audio) au tempo du
   Départ au même moment ; ◀ ▶ (ou un clic sur un numéro de la playlist) recalent le métronome.
 - Affichage : morceau attendu, temps de course, km estimé, cadence cible à cet endroit.
 - L’écran est gardé allumé (Wake Lock) : le navigateur mobile coupe sinon l’audio en arrière-plan.
-- Le métronome donne le bon tempo mais n’est pas calé sur les temps du morceau (phase inconnue :
-  l’application n’a pas accès au son joué par Spotify ou Deezer).
+- Avec Spotify ou Deezer, le métronome donne le bon tempo mais n’est pas calé sur les temps du morceau
+  (l’application n’a pas accès au son joué par leurs applications) ; avec Navidrome, il l’est.
 
 ## Formats d’entrée
 
@@ -172,6 +182,7 @@ src/core/          moteur, sans dépendance au DOM (testé)
   pacing.ts          plan de course : vitesse, cadence, modèle de Minetti
   library.ts         bibliothèque, import CSV/JSON
   bpm.ts             détection du tempo (flux spectral, autocorrélation, peigne)
+  beats.ts           suivi des temps (programmation dynamique) et affinage du tempo
   md5.ts             MD5 pour l’authentification Subsonic
   fit.ts             lecture des fichiers FIT (montres)
   activity.ts        sortie enregistrée → tronçons vitesse / pente / cadence
