@@ -166,8 +166,7 @@ const profiles = new ProfilePanel(
     calibration: $('calibration'),
     hint: $('calibration-hint'),
     baseCadence: $<HTMLInputElement>('base-cadence'),
-    uphill: $<HTMLInputElement>('uphill'),
-    downhill: $<HTMLInputElement>('downhill'),
+    rules: $('slope-rules'),
     newBtn: $('profile-new'),
     renameBtn: $('profile-rename'),
     deleteBtn: $('profile-delete'),
@@ -507,7 +506,7 @@ $('export-deezer').addEventListener('click', () => {
 
 // ---------- Calcul et rendu ----------
 
-for (const id of ['mode', 'base-cadence', 'uphill', 'downhill', 'tolerance', 'stretch', 'half-time', 'repeat']) {
+for (const id of ['mode', 'base-cadence', 'tolerance', 'stretch', 'half-time', 'repeat']) {
   $(id).addEventListener('input', () => update());
   $(id).addEventListener('change', () => update());
 }
@@ -563,11 +562,10 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   const plan = planRun(sections, {
     targetPace: pace,
     mode: $<HTMLSelectElement>('mode').value as PacingMode,
-    ...(profiles.planOptions(3600 / pace) ?? {
-      baseCadence: Number.isFinite(baseCadence) ? baseCadence : undefined,
-      uphillSensitivity: numberInput('uphill', 0.6),
-      downhillSensitivity: numberInput('downhill', 0.3),
-    }),
+    // X : cadence au plat (calibrage du profil, saisie manuelle ou estimation) ; la pente suit les
+    // règles par tranche du profil.
+    ...(profiles.planOptions(3600 / pace) ?? { baseCadence: Number.isFinite(baseCadence) ? baseCadence : undefined }),
+    slopeRules: profiles.slopeRules(),
   });
   // Les applications de streaming jouent au tempo original ; seul le lecteur interne (Navidrome)
   // peut ajuster la vitesse de lecture.
@@ -626,6 +624,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
         <td>${km(s.startDist, 1)} → ${km(s.endDist, 1)}</td>
         <td class="num">${Math.round(s.length)} m</td>
         <td class="num">${s.grade >= 0 ? '+' : ''}${(s.grade * 100).toFixed(1)} %</td>
+        <td title="${esc(ruleById(s.ruleId)?.tip ?? '')}">${esc(ruleById(s.ruleId)?.label ?? '')}</td>
         <td class="num">${formatPace(s.pace)} /km</td>
         <td class="num strong">${s.cadence}</td>
         <td class="num">${formatDuration(s.startTime)}</td>
@@ -665,6 +664,19 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
 }
 
 // ---------- Pendant la course ----------
+
+function ruleById(id: string | undefined) {
+  return id ? profiles.slopeRules().find((r) => r.id === id) : undefined;
+}
+
+/** Conseil de la tranche de pente en cours (rien sur le plat). */
+function showTip(plan: RunPlan, runTime: number): void {
+  const section = plan.sections.find((s) => runTime < s.endTime) ?? plan.sections[plan.sections.length - 1];
+  const rule = ruleById(section?.ruleId);
+  const el = $('run-tip');
+  el.hidden = !rule || rule.id === 'flat' || runTime >= plan.totalTime;
+  el.innerHTML = rule ? `<strong>${esc(rule.label)}</strong> · ${esc(rule.tip)}` : '';
+}
 
 const companion = new RunCompanion((snap) => renderRun(snap));
 
@@ -711,6 +723,7 @@ function renderRun(snap: CompanionSnapshot): void {
     $('run-cad').textContent = String(Math.round(entry.effectiveCadence));
     const d = distanceAt(current.plan, snap.runTime);
     $('run-km').textContent = snap.runTime >= current.plan.totalTime ? 'Arrivée !' : `km ${km(d, 1)} · cible ${cadenceAt(current.plan, snap.runTime)} pas/min`;
+    showTip(current.plan, snap.runTime);
   }
   $('run-cad').classList.toggle('silent', !snap.clicking);
 
@@ -772,6 +785,7 @@ function renderPlayerRun(snap: PlayerSnapshot): void {
     $('run-cad').textContent = String(Math.round(entry.effectiveCadence));
     $('run-time').textContent = formatDuration(runTime);
     $('run-km').textContent = runTime >= current.plan.totalTime ? 'Arrivée !' : `km ${km(distanceAt(current.plan, runTime), 1)} · cible ${cadenceAt(current.plan, runTime)} pas/min`;
+    showTip(current.plan, runTime);
   }
   $('run-cad').classList.toggle('silent', !snap.playing);
   if (!seeking) runSeek.value = String(snap.duration > 0 ? Math.round((snap.position / snap.duration) * 1000) : 0);

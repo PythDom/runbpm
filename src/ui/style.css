@@ -886,3 +886,58 @@ button[data-armed='1'] {
   color: var(--error-text);
   font-weight: 600;
 }
+
+/* ---------- Règles par pente ---------- */
+
+.slope-rules {
+  margin-top: 10px;
+}
+
+.rules-table {
+  font-size: 0.85rem;
+}
+
+.rules-table th {
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rules-table th span {
+  display: block;
+  font-weight: 400;
+}
+
+.rules-table td {
+  white-space: normal;
+  vertical-align: top;
+}
+
+.rules-table td.rule-value {
+  white-space: nowrap;
+}
+
+.rules-table input {
+  display: inline-block;
+  width: 64px;
+  margin: 0 4px;
+  padding: 4px 6px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rules-table input.changed {
+  border-color: var(--accent);
+}
+
+.rule-unit {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.run-tip {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}

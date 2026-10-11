@@ -1,0 +1,5 @@
+{
+  "navidromeUrl": "http://192.168.129.34:4533",
+  "dataFile": "data/runbpm-db.json",
+  "port": 8080
+}

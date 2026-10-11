@@ -1,4 +1,5 @@
 import type { Section } from './sections';
+import { ruleForGrade, type SlopeRule } from './slopeRules';
 
 /**
  * Plan de course : vitesse, temps de passage et cadence cible pour chaque section.
@@ -33,6 +34,12 @@ export interface PlanOptions {
    * calibrage, qui mesure cet effet sur les sorties du coureur.
    */
   sectionSpeedEffect?: boolean;
+  /**
+   * Règles de cadence par tranche de pente (voir slopeRules.ts). Si elles sont fournies, elles
+   * remplacent les coefficients linéaires de montée et de descente, et l'effet de vitesse par
+   * section (les règles décrivent déjà la cadence en côte, ralentissement compris).
+   */
+  slopeRules?: readonly SlopeRule[];
 }
 
 export const DEFAULT_PLAN_OPTIONS: Omit<PlanOptions, 'targetPace'> = {
@@ -49,6 +56,8 @@ export interface PlannedSection extends Section {
   pace: number;
   /** Cadence cible en pas/min. */
   cadence: number;
+  /** Tranche de pente appliquée (si des règles par pente sont utilisées). */
+  ruleId?: string;
   startTime: number;
   endTime: number;
 }
@@ -60,7 +69,8 @@ export interface RunPlan {
   baseCadence: number;
 }
 
-export const MIN_CADENCE = 140;
+/** Bas de la plage : la marche active en très forte montée descend vers 110–130 pas/min. */
+export const MIN_CADENCE = 100;
 export const MAX_CADENCE = 210;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -119,11 +129,20 @@ export function planRun(sections: Section[], options: Partial<PlanOptions> & { t
   const planned = sections.map((s, k): PlannedSection => {
     const speed = flatSpeed * factors[k];
     const gradePct = s.grade * 100;
-    const slopeDelta = gradePct >= 0 ? gradePct * opts.uphillSensitivity : -gradePct * opts.downhillSensitivity;
-    const speedDelta = opts.sectionSpeedEffect ? opts.speedSensitivity * (speed - flatSpeed) * 3.6 : 0;
-    const cadence = Math.round(clamp(baseCadence + speedDelta + slopeDelta, MIN_CADENCE, MAX_CADENCE));
+    let raw: number;
+    let ruleId: string | undefined;
+    if (opts.slopeRules) {
+      const rule = ruleForGrade(gradePct, opts.slopeRules);
+      ruleId = rule.id;
+      raw = rule.mode === 'absolute' ? rule.value : baseCadence + rule.value;
+    } else {
+      const slopeDelta = gradePct >= 0 ? gradePct * opts.uphillSensitivity : -gradePct * opts.downhillSensitivity;
+      const speedDelta = opts.sectionSpeedEffect ? opts.speedSensitivity * (speed - flatSpeed) * 3.6 : 0;
+      raw = baseCadence + speedDelta + slopeDelta;
+    }
+    const cadence = Math.round(clamp(raw, MIN_CADENCE, MAX_CADENCE));
     const duration = s.length / speed;
-    const p: PlannedSection = { ...s, speed, pace: 1000 / speed, cadence, startTime: t, endTime: t + duration };
+    const p: PlannedSection = { ...s, speed, pace: 1000 / speed, cadence, ruleId, startTime: t, endTime: t + duration };
     t += duration;
     return p;
   });
