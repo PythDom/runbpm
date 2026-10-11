@@ -2,6 +2,7 @@ import { readActivity, type CadenceSegment } from '../core/activity';
 import { calibrate, predictCadence, type CalibrationResult } from '../core/calibration';
 import type { PlanOptions } from '../core/pacing';
 import { safeStorage } from '../services/spotify';
+import { confirmClick } from './confirm';
 
 /**
  * Profils coureur : chacun a ses réglages de cadence et, en option, un calibrage personnel issu
@@ -55,6 +56,11 @@ export class ProfilePanel {
       newBtn: HTMLElement;
       renameBtn: HTMLElement;
       deleteBtn: HTMLElement;
+      /** Saisie du nom (création ou renommage), dans la page plutôt qu'une boîte de dialogue. */
+      nameForm: HTMLElement;
+      nameInput: HTMLInputElement;
+      nameSave: HTMLElement;
+      nameCancel: HTMLElement;
     },
     private readonly onChange: () => void,
   ) {
@@ -67,9 +73,24 @@ export class ProfilePanel {
       this.render();
       onChange();
     });
-    el.newBtn.addEventListener('click', () => {
-      const name = prompt('Nom du nouveau profil coureur :')?.trim();
+    let nameMode: 'new' | 'rename' = 'new';
+    const openNameForm = (mode: 'new' | 'rename') => {
+      nameMode = mode;
+      el.nameInput.value = mode === 'rename' ? this.current.name : '';
+      el.nameInput.placeholder = mode === 'rename' ? 'Nouveau nom' : 'Nom du coureur';
+      el.nameForm.hidden = false;
+      el.nameInput.focus();
+    };
+    const saveName = () => {
+      const name = el.nameInput.value.trim();
       if (!name) return;
+      el.nameForm.hidden = true;
+      if (nameMode === 'rename') {
+        this.current.name = name;
+        this.persist();
+        this.render();
+        return;
+      }
       const p = newProfile(name);
       this.data.profiles.push(p);
       this.data.current = p.id;
@@ -77,26 +98,25 @@ export class ProfilePanel {
       this.applyToInputs();
       this.render();
       onChange();
-    });
-    el.renameBtn.addEventListener('click', () => {
-      const name = prompt('Nouveau nom :', this.current.name)?.trim();
-      if (!name) return;
-      this.current.name = name;
-      this.persist();
-      this.render();
+    };
+    el.newBtn.addEventListener('click', () => openNameForm('new'));
+    el.renameBtn.addEventListener('click', () => openNameForm('rename'));
+    el.nameSave.addEventListener('click', saveName);
+    el.nameCancel.addEventListener('click', () => (el.nameForm.hidden = true));
+    el.nameInput.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') saveName();
+      else if (ev.key === 'Escape') el.nameForm.hidden = true;
     });
     el.deleteBtn.addEventListener('click', () => {
-      if (this.data.profiles.length <= 1) {
-        alert('Il faut garder au moins un profil.');
-        return;
-      }
-      if (!confirm(`Supprimer le profil « ${this.current.name} » et son calibrage ?`)) return;
-      this.data.profiles = this.data.profiles.filter((p) => p.id !== this.data.current);
-      this.data.current = this.data.profiles[0].id;
-      this.persist();
-      this.applyToInputs();
-      this.render();
-      onChange();
+      if (this.data.profiles.length <= 1) return;
+      confirmClick(el.deleteBtn, `Supprimer « ${this.current.name} » ?`, () => {
+        this.data.profiles = this.data.profiles.filter((p) => p.id !== this.data.current);
+        this.data.current = this.data.profiles[0].id;
+        this.persist();
+        this.applyToInputs();
+        this.render();
+        onChange();
+      });
     });
     // Les réglages manuels sont mémorisés dans le profil courant.
     for (const input of [el.baseCadence, el.uphill, el.downhill]) {
@@ -121,14 +141,16 @@ export class ProfilePanel {
       }
     });
     el.calibration.addEventListener('click', (ev) => {
-      if ((ev.target as HTMLElement).id !== 'calibration-clear') return;
-      if (!confirm('Effacer le calibrage de ce profil ?')) return;
-      this.current.calibration = undefined;
-      this.message = '';
-      this.persist();
-      this.applyToInputs();
-      this.render();
-      onChange();
+      const btn = ev.target as HTMLElement;
+      if (btn.id !== 'calibration-clear') return;
+      confirmClick(btn, 'Confirmer l’effacement', () => {
+        this.current.calibration = undefined;
+        this.message = '';
+        this.persist();
+        this.applyToInputs();
+        this.render();
+        onChange();
+      });
     });
     this.applyToInputs();
     this.render();
@@ -247,6 +269,9 @@ export class ProfilePanel {
   }
 
   private render(): void {
+    const single = this.data.profiles.length <= 1;
+    (this.el.deleteBtn as HTMLButtonElement).disabled = single;
+    this.el.deleteBtn.title = single ? 'Il faut garder au moins un profil' : 'Supprimer ce profil et son calibrage';
     this.el.select.innerHTML = this.data.profiles
       .map((p) => `<option value="${esc(p.id)}" ${p.id === this.current.id ? 'selected' : ''}>${esc(p.name)}</option>`)
       .join('');

@@ -875,3 +875,14 @@ input:disabled {
   opacity: 0.75;
   cursor: not-allowed;
 }
+
+#profile-form input {
+  flex: 1 1 140px;
+  width: auto;
+  margin-top: 0;
+}
+
+button[data-armed='1'] {
+  color: var(--error-text);
+  font-weight: 600;
+}

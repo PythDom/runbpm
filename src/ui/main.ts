@@ -13,6 +13,7 @@ import { LibraryView, LOW_CONFIDENCE, NO_PULSE } from './libraryView';
 import { importNavidrome } from './navidromeImport';
 import { NavidromePanel } from './navidromePanel';
 import { RunPlayer, type PlayerSnapshot, type PlayerTrack } from './player';
+import { confirmClick } from './confirm';
 import { ProfilePanel } from './profiles';
 import { SpotifyPanel } from './spotifyPanel';
 
@@ -170,6 +171,10 @@ const profiles = new ProfilePanel(
     newBtn: $('profile-new'),
     renameBtn: $('profile-rename'),
     deleteBtn: $('profile-delete'),
+    nameForm: $('profile-form'),
+    nameInput: $<HTMLInputElement>('profile-name'),
+    nameSave: $('profile-name-save'),
+    nameCancel: $('profile-name-cancel'),
   },
   () => update(),
 );
@@ -254,9 +259,12 @@ $('library-demo').addEventListener('click', () => {
 });
 
 $('library-clear').addEventListener('click', () => {
-  if (state.library.length > 20 && !confirm(`Retirer les ${state.library.length} morceaux de la bibliothèque ?`)) return;
-  state.library = [];
-  libraryChanged();
+  const clear = () => {
+    state.library = [];
+    libraryChanged();
+  };
+  if (state.library.length > 20) confirmClick($('library-clear'), `Retirer les ${state.library.length} morceaux ?`, clear);
+  else clear();
 });
 
 // ---------- Analyse des fichiers audio ----------

@@ -51,6 +51,11 @@
               <button type="button" class="link danger" id="profile-delete">Supprimer</button>
             </span>
           </label>
+          <div id="profile-form" class="copy-row" hidden>
+            <input type="text" id="profile-name" aria-label="Nom du profil" maxlength="40" />
+            <button type="button" id="profile-name-save" class="primary">Enregistrer</button>
+            <button type="button" id="profile-name-cancel" class="link">Annuler</button>
+          </div>
           <label>Votre cadence sur le plat à cette allure (pas/min)
             <input type="number" id="base-cadence" min="140" max="210" step="1" placeholder="auto" />
           </label>
