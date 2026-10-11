@@ -20,6 +20,8 @@ export class NavidromePanel {
   private status = '';
   private statusIsError = false;
   private importing?: { text: string; done: number; total: number };
+  private sharedInfo = '';
+  private sharedIsError = false;
   private clientImpl?: SubsonicClient;
   /** Saisie en cours, conservée si la connexion échoue. */
   private draft?: { url: string; user: string };
@@ -52,6 +54,13 @@ export class NavidromePanel {
   async init(): Promise<void> {
     const creds = this.saved();
     if (creds) await this.tryClient(new SubsonicClient(creds), false);
+    this.render();
+  }
+
+  /** État de la base partagée du serveur RunBPM. */
+  setSharedInfo(text: string, isError = false): void {
+    this.sharedInfo = text;
+    this.sharedIsError = isError;
     this.render();
   }
 
@@ -159,6 +168,7 @@ export class NavidromePanel {
       <p class="muted small ellipsis">${esc(creds.url)}</p>
       ${importBlock}
       <p class="muted small">BPM des tags si disponible (option de la carte Musique), sinon mesuré en lisant un extrait de chaque morceau.</p>
+      ${this.sharedInfo ? `<p class="small ${this.sharedIsError ? 'error-text' : 'muted'}" id="nd-shared">${esc(this.sharedInfo)}</p>` : ''}
       ${status}`;
   }
 }

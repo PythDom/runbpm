@@ -68,6 +68,11 @@
   box-sizing: border-box;
 }
 
+/* L'attribut hidden l'emporte sur les display: flex/grid des composants. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -811,6 +816,18 @@ input.bpm-edit {
 
 .lib-table td.actions button.link {
   margin-left: 6px;
+}
+
+.lib-table .sel-col {
+  width: 28px;
+  text-align: center;
+}
+
+.lib-table .sel-col input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 tr.doubtful td {

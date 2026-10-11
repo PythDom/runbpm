@@ -11,7 +11,8 @@ en tenant compte du **dénivelé** et de l’**allure désirée**, puis accompag
   - **Spotify / Deezer** : la musique est jouée par l’application officielle ; RunBPM superpose un
     métronome au tempo du morceau en cours.
 
-Application web 100 % locale : tout est calculé dans le navigateur, aucun fichier audio n’est envoyé.
+Tout est calculé dans le navigateur, aucun fichier audio n’est envoyé. Un petit serveur optionnel
+(`npm start`) ajoute une **base partagée** des morceaux Navidrome et de leurs BPM.
 
 ## Démarrage
 
@@ -20,6 +21,13 @@ npm install
 npm run dev      # http://127.0.0.1:5173 (Spotify refuse « localhost »)
 npm test         # tests unitaires (vitest)
 npm run build    # version statique dans dist/ (déployable telle quelle, ex. GitHub Pages)
+npm start        # sert dist/ avec la base partagée (voir plus bas), port 8080
+```
+
+Sous Windows (PowerShell), pour activer la base partagée avec votre serveur Navidrome :
+
+```powershell
+$env:NAVIDROME_URL="http://192.168.129.34:4533"; npm run dev
 ```
 
 Essai rapide : « Essayer la boucle vallonnée d’exemple », puis « Bibliothèque de démo ».
@@ -55,16 +63,35 @@ L’import CSV/JSON reste possible (voir *Formats d’entrée*).
    - *Allure constante* : même vitesse partout.
    - *Effort constant* : vitesse modulée par le coût énergétique de la pente (Minetti et al., 2002,
      atténué et borné), en conservant l’allure moyenne demandée.
-   - Cadence = cadence sur le plat (saisie par le coureur, ou estimée : ≈ 140 + 3 × vitesse en km/h)
-     \+ 0,6 pas/min par % de montée, + 0,3 pas/min par % de descente (réglables).
+   - Cadence = cadence sur le plat **X** (saisie, calibrée, ou estimée : ≈ 140 + 3 × vitesse en km/h),
+     ajustée selon la **tranche de pente** de la section (tableau ci-dessous).
 3. **Choix des morceaux** → on avance dans le temps de course et on choisit à chaque fois le morceau dont
    le tempo colle le mieux à la cadence cible **sur toute sa durée d’écoute**. Les services de streaming
    jouent au tempo original : seuls les morceaux déjà au bon BPM (ou à mi-tempo) sont retenus.
 
+### Cadence selon la pente
+
+Principe : garder une cadence à peu près stable et laisser la longueur de foulée absorber la pente.
+Valeurs par défaut, **modifiables par profil** (carte Course › « Cadence selon la pente et calibrage ») ;
+une borne appartient à la tranche la plus raide (+5 % = montée modérée, −5 % = descente modérée).
+
+| Pente | Cadence | Conseil affiché pendant la course |
+|---|---|---|
+| ≥ +15 % | 120 pas/min (marche active) | grandes foulées décidées, mains sur les cuisses, rythme régulier |
+| +10 à +15 % | X − 7 | petits pas élastiques ; se régler sur l’effort ou la FC |
+| +5 à +10 % | X + 3 | pas plus courts, médio-pied, inclinaison depuis les chevilles, bras actifs |
+| +1 à +5 % | X | garder la cadence, raccourcir la foulée |
+| −1 à +1 % | X | cadence de référence |
+| −1 à −5 % | X + 3 | laisser la gravité allonger la foulée, rester relâché |
+| −5 à −10 % | X + 7 | pieds sous le corps, légère inclinaison vers l’avant |
+| < −10 % | 190 pas/min | pas rapides et légers, bras écartés, genoux souples, contrôler la vitesse par la fréquence |
+
+Le tableau des sections indique la tranche de chacune, et le conseil s’affiche pendant la course.
+
 ### Profils coureur et calibrage personnel
 
-Chaque **profil coureur** (carte Course) garde ses propres réglages : cadence au plat, coefficients de
-montée et de descente. Dans « Réglages avancés et calibrage », on peut **calibrer** un profil avec une
+Chaque **profil coureur** (carte Course) garde ses propres réglages : cadence au plat et tableau des
+tranches de pente. On peut aussi **calibrer** un profil avec une
 ou plusieurs sorties de sa montre (**FIT** ou TCX avec cadence), de préférence vallonnées :
 
 - les sorties sont découpées en tronçons de 100 m (vitesse, pente, cadence) ; arrêts, marche, cadences
@@ -72,8 +99,8 @@ ou plusieurs sorties de sa montre (**FIT** ou TCX avec cadence), de préférence
 - le modèle `cadence = k0 + kv × vitesse + a × montée(%) + b × descente(%)` est ajusté par moindres
   carrés, avec un rappel doux vers les valeurs par défaut : une sortie plate ne renseigne pas sur la
   pente, les coefficients de pente restent alors proches de 0,6 / 0,3 ;
-- une fois calibré, la cadence au plat suit l'allure choisie, et l'effet de la vitesse est appliqué
-  section par section (en « effort constant », ralentir en montée baisse aussi un peu la cadence).
+- une fois calibré, la cadence au plat X suit l'allure choisie ; les tranches de pente s'appliquent
+  ensuite (les coefficients de pente mesurés sont affichés pour information).
 
 Le lecteur FIT est intégré (sans dépendance) : en-têtes compressés, gros/petit-boutisme, CRC, activités
 autres que la course à pied refusées.
@@ -104,6 +131,35 @@ Pour un serveur auto-hébergé compatible Subsonic / OpenSubsonic (Navidrome, Go
   (au tempo original, l’ajustement n’existant que dans RunBPM).
 - Navidrome autorise les appels depuis n’importe quelle page (CORS). Si RunBPM est servi en HTTPS, le
   serveur doit l’être aussi (sinon le navigateur bloque) : en local, ouvrez RunBPM en `http://127.0.0.1`.
+
+### Base partagée et sélection « course »
+
+Lancé avec son serveur (`npm run dev`, `npx vite preview` ou `npm start`) et l’adresse de Navidrome,
+RunBPM garde une **base commune** des morceaux du serveur avec leur BPM :
+
+- le premier import mesure les morceaux et les enregistre ; **les suivants (tous utilisateurs, tous
+  appareils) ne mesurent que les morceaux absents de la base**. À la connexion, la bibliothèque est
+  remplie depuis la base en une fraction de seconde ;
+- une **correction manuelle** du BPM est partagée et n’est jamais écrasée par une nouvelle analyse ;
+- chaque utilisateur **coche** dans la Bibliothèque les morceaux qu’il veut entendre en courant (case par
+  morceau, case d’en-tête pour les morceaux affichés, filtre « Cochés seulement »), puis active
+  « Morceaux cochés seulement » dans les options de sélection. La sélection est propre à chaque compte
+  Navidrome et le suit d’un appareil à l’autre ;
+- **identité** : celle de Navidrome. Le navigateur transmet le jeton Subsonic (jamais le mot de passe),
+  que le serveur RunBPM vérifie auprès de Navidrome (`ping`, mis en cache 10 min). Pas de compte à créer.
+
+Configuration, par variables d’environnement ou fichier `runbpm.config.json` (voir
+`runbpm.config.example.json`) :
+
+| Variable | Clé du fichier | Défaut | Rôle |
+|---|---|---|---|
+| `NAVIDROME_URL` | `navidromeUrl` | — (base désactivée) | serveur qui authentifie les utilisateurs |
+| `RUNBPM_DATA` | `dataFile` | `data/runbpm-db.json` | fichier de la base (écriture atomique) |
+| `PORT` / `HOST` | `port` / `host` | `8080` / `0.0.0.0` | pour `npm start` |
+
+Sans serveur (site statique), tout fonctionne comme avant : bibliothèque et sélection restent dans le
+navigateur. L’adresse saisie dans RunBPM doit désigner le même Navidrome que `NAVIDROME_URL` (le
+jeton est vérifié par celui-ci).
 
 ### Spotify
 « Créer la playlist Spotify » cherche chaque morceau sur Spotify (titre, artiste, durée ; seules les
@@ -194,21 +250,28 @@ src/core/          moteur, sans dépendance au DOM (testé)
   spotifyMatch.ts    choix du bon résultat de recherche Spotify
   export.ts          M3U / CSV / JSON / liste pour transfert (Deezer)
   demo.ts            bibliothèque fictive de démonstration
+  slopeRules.ts      tranches de pente → cadence, conseils de course
 src/services/spotify.ts   connexion OAuth PKCE, recherche, création de playlist, état du lecteur
 src/services/subsonic.ts  client Subsonic / Navidrome (jeton, search3, stream, Range, playlists)
+src/services/sharedDb.ts  client de la base partagée, fusion avec la bibliothèque locale
 src/ui/            interface (TypeScript sans framework)
   analyzer.ts        analyse des fichiers audio (décodage Web Audio + tags + tempo)
   navidromeImport.ts import de la bibliothèque du serveur, mesure du tempo à distance
   navidromePanel.ts  connexion au serveur Navidrome
   player.ts          lecteur interne (flux du serveur, ajustement du tempo, métronome superposé)
   profiles.ts        profils coureur et calibrage
-  libraryView.ts     tableau de la bibliothèque (correction des BPM)
+  libraryView.ts     tableau de la bibliothèque (correction des BPM, morceaux cochés)
+  selection.ts       sélection « course » (navigateur + serveur)
   companion.ts       compagnon de course (chronomètre / synchro Spotify, Wake Lock)
   metronome.ts       métronome Web Audio
   spotifyPanel.ts    connexion Spotify
   chart.ts           graphique SVG
 tests/             tests vitest (dont signaux et fichiers audio synthétiques)
 scripts/generate-samples.mjs   régénère les fichiers d’exemple
+server/            serveur optionnel (Node, sans dépendance)
+  api.mjs            API de la base partagée (/api/health, songs, selection)
+  config.mjs         configuration (variables d’environnement ou runbpm.config.json)
+  index.mjs          serveur autonome : API + dist/ (npm start)
 ```
 
 ## Pistes d’évolution

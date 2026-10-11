@@ -151,6 +151,7 @@ export function createApi(options) {
         let added = 0;
         let updated = 0;
         let kept = 0;
+        let unchanged = 0;
         for (const raw of Array.isArray(body.songs) ? body.songs : []) {
           const s = cleanSong(raw);
           if (!s) continue;
@@ -161,12 +162,17 @@ export function createApi(options) {
             kept++;
             continue;
           }
+          if (existing && existing.bpm === s.bpm && existing.bpmSource === s.bpmSource) {
+            d.songs[s.id] = { ...existing, title: s.title, artist: s.artist, album: s.album, duration: s.duration };
+            unchanged++;
+            continue;
+          }
           d.songs[s.id] = { ...s, updatedAt: new Date().toISOString(), updatedBy: user };
           if (existing) updated++;
           else added++;
         }
         scheduleSave();
-        return send(res, 200, { added, updated, kept, total: Object.keys(d.songs).length });
+        return send(res, 200, { added, updated, kept, unchanged, total: Object.keys(d.songs).length });
       }
       const m = /^\/api\/songs\/(.+)$/.exec(path);
       if (m && req.method === 'PATCH') {

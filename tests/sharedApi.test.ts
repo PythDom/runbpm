@@ -72,6 +72,8 @@ describe('base partagée', () => {
     const list = (await call('GET', '/api/songs', a)).body.songs as { id: string; bpm: number; title: string }[];
     expect(list.find((s) => s.id === '1')).toMatchObject({ bpm: 85, title: 'Nouveau titre' });
     expect(list.find((s) => s.id === '2')).toMatchObject({ bpm: 89 });
+    const r3 = await call('POST', '/api/songs', a, { songs: [song('2', 89)] });
+    expect(r3.body).toMatchObject({ updated: 0, unchanged: 1 });
     expect((await call('PATCH', '/api/songs/1', a, { bpm: 20 })).status).toBe(400);
     expect((await call('PATCH', '/api/songs/inconnu', a, { bpm: 170 })).status).toBe(404);
   });

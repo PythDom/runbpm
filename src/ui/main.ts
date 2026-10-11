@@ -12,6 +12,8 @@ import { RunCompanion, type CompanionSnapshot } from './companion';
 import { LibraryView, LOW_CONFIDENCE, NO_PULSE } from './libraryView';
 import { importNavidrome } from './navidromeImport';
 import { NavidromePanel } from './navidromePanel';
+import { Selection } from './selection';
+import { mergeShared, SharedDb, toShared, type SharedSong } from '../services/sharedDb';
 import { RunPlayer, type PlayerSnapshot, type PlayerTrack } from './player';
 import { confirmClick } from './confirm';
 import { ProfilePanel } from './profiles';
@@ -25,7 +27,7 @@ const LIBRARY_KEY = 'runbpm.library';
 const SERVICE_KEY = 'runbpm.service';
 /** Réglages du formulaire conservés pendant l'aller-retour de connexion à Spotify. */
 // (cadence de base et coefficients de pente sont mémorisés dans le profil coureur)
-const SETTINGS_IDS = ['pace', 'speed', 'mode', 'tolerance', 'stretch', 'half-time', 'repeat', 'use-tag-bpm', 'm-volume', 'm-overlay', 'm-offset', 'keep-awake'];
+const SETTINGS_IDS = ['pace', 'speed', 'mode', 'tolerance', 'stretch', 'half-time', 'repeat', 'only-selected', 'use-tag-bpm', 'm-volume', 'm-overlay', 'm-offset', 'keep-awake'];
 const PENDING_KEY = 'runbpm.pending';
 
 const state: {
@@ -195,15 +197,23 @@ speedInput.addEventListener('input', () => {
 
 // ---------- Bibliothèque ----------
 
-const libraryView = new LibraryView(
-  $('library-view'),
+// Morceaux cochés « pour courir » : dans ce navigateur, et sur le serveur RunBPM s'il y en a un.
+const selection = new Selection(
   () => state.library,
-  () => {
-    saveLibrary();
-    renderLibrarySummary();
-    update();
-  },
+  (msg) => libraryView.setNote(`Sélection non enregistrée sur le serveur : ${msg}`),
 );
+/** Base partagée du serveur RunBPM, quand il en sert une et que Navidrome est connecté. */
+let shared: SharedDb | undefined;
+
+const libraryView = new LibraryView($('library-view'), () => state.library, selection, (edit) => {
+  if (edit.edited?.navidromeId && shared) {
+    const song = edit.edited;
+    shared.setBpm(song.navidromeId!, song.bpm).catch((e: Error) => libraryView.setNote(`Correction non partagée : ${e.message}`));
+  }
+  if (!edit.selection) saveLibrary();
+  renderLibrarySummary();
+  update();
+});
 
 function renderLibrarySummary(): void {
   const el = $('library-summary');
@@ -353,12 +363,58 @@ const spotify = new SpotifyPanel($('spotify-panel'), {
 let navidromeImport: { cancelled: boolean } | undefined;
 
 const navidrome = new NavidromePanel($('navidrome-panel'), {
-  onConnectionChange: () => update(),
+  onConnectionChange: () => {
+    update();
+    void syncShared();
+  },
   onImport: () => void runNavidromeImport(),
   onStopImport: () => {
     if (navidromeImport) navidromeImport.cancelled = true;
   },
 });
+
+/**
+ * Base partagée : à la connexion à Navidrome, récupère les BPM déjà mesurés (par n'importe quel
+ * utilisateur) et la sélection de l'utilisateur ; envoie les morceaux mesurés ici et absents du serveur.
+ */
+async function syncShared(): Promise<void> {
+  const client = navidrome.client;
+  shared = undefined;
+  selection.detach();
+  if (!client) {
+    navidrome.setSharedInfo('');
+    return;
+  }
+  const health = await SharedDb.health();
+  if (!health) {
+    navidrome.setSharedInfo('Pas de base partagée (RunBPM servi sans son serveur) : bibliothèque et sélection restent dans ce navigateur.');
+    return;
+  }
+  if (!health.configured) {
+    navidrome.setSharedInfo('Base partagée désactivée : définissez NAVIDROME_URL au démarrage du serveur RunBPM.');
+    return;
+  }
+  const db = new SharedDb(client.creds);
+  try {
+    navidrome.setSharedInfo('Base partagée : synchronisation…');
+    const merged = mergeShared(state.library, await db.songs());
+    state.library = merged.library;
+    const sent = merged.toUpload.length ? await db.upsert(merged.toUpload) : undefined;
+    shared = db;
+    await selection.attach(db);
+    const total = sent?.total ?? health.songs;
+    navidrome.setSharedInfo(
+      `Base partagée : ${total} morceau(x) mesuré(s)` +
+        (merged.received ? ` · ${merged.received} reçu(s)` : '') +
+        (merged.toUpload.length ? ` · ${merged.toUpload.length} envoyé(s)` : '') +
+        '. L’import ne mesure que les morceaux absents de la base.',
+    );
+  } catch (e) {
+    navidrome.setSharedInfo(`Base partagée indisponible : ${(e as Error).message}`, true);
+  } finally {
+    libraryChanged();
+  }
+}
 
 async function runNavidromeImport(): Promise<void> {
   const client = navidrome.client;
@@ -367,6 +423,16 @@ async function runNavidromeImport(): Promise<void> {
   navidromeImport = signal;
   let sinceSave = 0;
   const started = performance.now();
+  // Morceaux mesurés à envoyer à la base partagée, par paquets.
+  let outbox: SharedSong[] = [];
+  let shareError = '';
+  const share = async () => {
+    const db = shared;
+    if (!db || outbox.length === 0) return;
+    const batch = outbox;
+    outbox = [];
+    await db.upsert(batch).catch((e: Error) => (shareError = e.message));
+  };
   try {
     const { progress, errors } = await importNavidrome(
       client,
@@ -374,10 +440,13 @@ async function runNavidromeImport(): Promise<void> {
       { useTagBpm: $<HTMLInputElement>('use-tag-bpm').checked },
       (song) => {
         state.library = mergeLibraries(state.library, [song]);
+        const s = toShared(song);
+        if (s) outbox.push(s);
         if (++sinceSave >= 20) {
           sinceSave = 0;
           saveLibrary();
           renderLibrarySummary();
+          void share();
         }
       },
       (p) => {
@@ -394,11 +463,18 @@ async function runNavidromeImport(): Promise<void> {
       },
       signal,
     );
+    await share();
+    // Morceaux existants reliés au serveur pendant l'import : on les partage aussi.
+    if (shared) {
+      const linked = state.library.map(toShared).filter((s): s is SharedSong => !!s);
+      await shared.upsert(linked).catch((e: Error) => (shareError = e.message));
+    }
     const summary =
       `Import ${signal.cancelled ? 'interrompu' : 'terminé'} : ${progress.added} morceau(x) ajouté(s)` +
       (progress.linked ? `, ${progress.linked} déjà connu(s) relié(s) au serveur` : '') +
       (progress.failed ? `, ${progress.failed} ignoré(s)` : '') +
-      '.';
+      '.' +
+      (shared ? (shareError ? ` Base partagée non mise à jour : ${shareError}` : ' Base partagée à jour.') : '');
     navidrome.setImportProgress(undefined, summary);
     if (errors.length) showMessages([], [`Morceaux ignorés : ${errors.slice(0, 5).join(' ; ')}${errors.length > 5 ? ` ; … (${errors.length - 5} autres)` : ''}`]);
   } catch (e) {
@@ -506,7 +582,7 @@ $('export-deezer').addEventListener('click', () => {
 
 // ---------- Calcul et rendu ----------
 
-for (const id of ['mode', 'base-cadence', 'tolerance', 'stretch', 'half-time', 'repeat']) {
+for (const id of ['mode', 'base-cadence', 'tolerance', 'stretch', 'half-time', 'repeat', 'only-selected']) {
   $(id).addEventListener('input', () => update());
   $(id).addEventListener('change', () => update());
 }
@@ -530,12 +606,20 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   // On écarte les morceaux sans pulsation détectée ; pour Spotify, ceux qu'il ne propose pas ;
   // pour Navidrome, ceux qui ne sont pas sur le serveur.
   const notFound = svc === 'spotify' ? spotify.notFound() : new Set<string>();
-  const library = state.library.filter(
+  let library = state.library.filter(
     (s) =>
       !notFound.has(s.id) &&
       !(s.confidence !== undefined && s.confidence < NO_PULSE) &&
       (svc !== 'navidrome' || (navidrome.connected && !!s.navidromeId)),
   );
+  // Morceaux cochés seulement (ignoré tant qu'aucun morceau utilisable n'est coché).
+  const onlySelected = $<HTMLInputElement>('only-selected').checked;
+  const picked = library.filter((s) => selection.has(s));
+  $('only-selected-info').textContent = `(${picked.length} utilisable(s))`;
+  if (onlySelected && picked.length > 0) library = picked;
+  else if (onlySelected && library.length > 0) {
+    extraWarnings = [...extraWarnings, 'Aucun morceau coché utilisable : cochez des morceaux dans la Bibliothèque. Tous les morceaux sont proposés en attendant.'];
+  }
   if (svc === 'navidrome' && state.library.length > 0 && library.length === 0) {
     extraWarnings = [
       ...extraWarnings,
