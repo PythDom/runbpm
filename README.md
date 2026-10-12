@@ -11,8 +11,9 @@ en tenant compte du **dénivelé** et de l’**allure désirée**, puis accompag
   - **Spotify / Deezer** : la musique est jouée par l’application officielle ; RunBPM superpose un
     métronome au tempo du morceau en cours.
 
-Tout est calculé dans le navigateur, aucun fichier audio n’est envoyé. Un petit serveur optionnel
-(`npm start`) ajoute une **base partagée** des morceaux Navidrome et de leurs BPM.
+Tout est calculé dans l’application, aucun fichier audio n’est envoyé. RunBPM existe en **application
+Android** (APK) et en page web ; une **base partagée** (petit serveur Python, par exemple sur
+PythonAnywhere) garde les BPM mesurés et la sélection de chacun.
 
 ## Démarrage
 
@@ -21,16 +22,80 @@ npm install
 npm run dev      # http://127.0.0.1:5173 (Spotify refuse « localhost »)
 npm test         # tests unitaires (vitest)
 npm run build    # version statique dans dist/ (déployable telle quelle, ex. GitHub Pages)
-npm start        # sert dist/ avec la base partagée (voir plus bas), port 8080
-```
-
-Sous Windows (PowerShell), pour activer la base partagée avec votre serveur Navidrome :
-
-```powershell
-$env:NAVIDROME_URL="http://192.168.129.34:4533"; npm run dev
+npm run server   # base partagée locale pour essais (http://127.0.0.1:8000), Python 3.8+
 ```
 
 Essai rapide : « Essayer la boucle vallonnée d’exemple », puis « Bibliothèque de démo ».
+
+## Installation : téléphone, base partagée, PC
+
+```
+ PC (navigateur)            PythonAnywhere                 Téléphone (APK)
+ mesure les BPM   ──envoie──▶  base partagée  ◀──lit/coche──  prépare et joue la course
+      │                    (BPM + sélections)                     │
+      └──────────── lit la musique ── Navidrome ── lit la musique ┘
+```
+
+### 1. La base partagée sur PythonAnywhere (une fois)
+
+Un seul fichier Python, sans dépendance : `server/runbpm_server.py` (SQLite).
+
+1. Créez un compte gratuit sur [pythonanywhere.com](https://www.pythonanywhere.com) ; l’adresse sera
+   `https://VOTRE_NOM.pythonanywhere.com`.
+2. Ouvrez une console **Bash** (onglet *Consoles*) :
+   ```bash
+   git clone https://github.com/PythDom/runbpm.git
+   python3 runbpm/server/runbpm_server.py adduser dom      # un utilisateur par personne
+   python3 runbpm/server/runbpm_server.py adduser amie
+   ```
+   Chaque commande affiche un **code d’accès** (`dom:…`) : notez-le, il n’est affiché qu’une fois
+   (`adduser` à nouveau en génère un autre ; `revoke` retire l’accès ; `users` liste les comptes).
+3. Onglet *Web* › *Add a new web app* › *Manual configuration* › Python 3.x. Ouvrez le
+   *WSGI configuration file* et remplacez son contenu par celui de `server/pythonanywhere_wsgi.py`
+   (en remplaçant `VOTRE_NOM`). *Reload*.
+4. Vérifiez : `https://VOTRE_NOM.pythonanywhere.com/api/health` répond `{"ok": true, …}`.
+
+Compte gratuit : l’application web s’arrête au bout de 3 mois sans visite de l’onglet *Web* ; un clic
+sur *Run until 3 months from today* la prolonge. Mise à jour : `cd runbpm && git pull`, puis *Reload*.
+Sauvegarde : `python3 runbpm/server/runbpm_server.py export sauvegarde.json` (et `import` pour
+restaurer). La base est dans `~/runbpm-data/runbpm.sqlite`.
+
+### 2. Construire la base depuis le PC (une fois, puis pour les nouveaux morceaux)
+
+La mesure des BPM lit un extrait de chaque morceau : c’est plus rapide sur le PC, à côté du serveur.
+
+1. `npm install` puis `npm run dev`, et ouvrez http://127.0.0.1:5173.
+2. Carte Streaming › **Navidrome** : adresse locale (`http://192.168.129.34:4533`), utilisateur, mot de passe.
+3. Sous Navidrome, **Base partagée des BPM** : `https://VOTRE_NOM.pythonanywhere.com` et votre code.
+4. **Importer la bibliothèque du serveur** : chaque morceau mesuré est envoyé à la base par paquets.
+   L’import peut être arrêté et relancé : seuls les morceaux absents de la base sont mesurés.
+
+Les morceaux déjà analysés depuis un dossier local (« Analyser un dossier de musique ») sont reliés au
+serveur par titre et artiste, et envoyés aussi.
+
+### 3. L’application Android
+
+L’APK est construit par GitHub Actions (`.github/workflows/android.yml`) à chaque envoi sur le dépôt.
+
+1. *(Facultatif)* Dans GitHub › *Settings* › *Secrets and variables* › *Actions* › **Variables**, créez
+   `RUNBPM_SERVER` (`https://VOTRE_NOM.pythonanywhere.com`) et `NAVIDROME_URL` (adresse de Navidrome
+   joignable de l’extérieur) : l’application les proposera d’office.
+2. Sur le téléphone, téléchargez
+   **https://github.com/PythDom/runbpm/releases/download/android-latest/RunBPM.apk** (publié à chaque
+   mise à jour de `main` ; les autres branches produisent l’APK en *artifact* de l’action), ouvrez-le et
+   autorisez l’installation depuis le navigateur. Les mises à jour s’installent par-dessus, sans perte
+   de réglages.
+3. Dans l’application : Navidrome (adresse **joignable hors de chez vous** pour courir dehors), puis le
+   code d’accès de la base partagée. La bibliothèque arrive de la base, sans rien mesurer.
+
+Pendant la lecture, une notification « RunBPM : course en cours » maintient l’application active écran
+verrouillé (service Android « lecture multimédia ») ; l’option « Garder l’écran allumé » est appliquée
+par l’application. Restent réservés à la version web sur PC : la connexion Spotify (retour de
+connexion impossible vers l’application) et les exports de fichiers (M3U, CSV, JSON).
+
+La clé de signature `android/app/runbpm.keystore` est volontairement dans le dépôt pour que chaque APK
+puisse remplacer le précédent ; pour une clé privée, fournissez `RUNBPM_KEYSTORE`,
+`RUNBPM_KEYSTORE_PASSWORD`, `RUNBPM_KEY_ALIAS` au build.
 
 ## 1. Bibliothèque : analyse du dossier de musique
 
@@ -134,8 +199,8 @@ Pour un serveur auto-hébergé compatible Subsonic / OpenSubsonic (Navidrome, Go
 
 ### Base partagée et sélection « course »
 
-Lancé avec son serveur (`npm run dev`, `npx vite preview` ou `npm start`) et l’adresse de Navidrome,
-RunBPM garde une **base commune** des morceaux du serveur avec leur BPM :
+Avec une base partagée (voir *Installation*), RunBPM garde une **liste commune** des morceaux du
+serveur avec leur BPM :
 
 - le premier import mesure les morceaux et les enregistre ; **les suivants (tous utilisateurs, tous
   appareils) ne mesurent que les morceaux absents de la base**. À la connexion, la bibliothèque est
@@ -143,23 +208,16 @@ RunBPM garde une **base commune** des morceaux du serveur avec leur BPM :
 - une **correction manuelle** du BPM est partagée et n’est jamais écrasée par une nouvelle analyse ;
 - chaque utilisateur **coche** dans la Bibliothèque les morceaux qu’il veut entendre en courant (case par
   morceau, case d’en-tête pour les morceaux affichés, filtre « Cochés seulement »), puis active
-  « Morceaux cochés seulement » dans les options de sélection. La sélection est propre à chaque compte
-  Navidrome et le suit d’un appareil à l’autre ;
-- **identité** : celle de Navidrome. Le navigateur transmet le jeton Subsonic (jamais le mot de passe),
-  que le serveur RunBPM vérifie auprès de Navidrome (`ping`, mis en cache 10 min). Pas de compte à créer.
+  « Morceaux cochés seulement » dans les options de sélection. La sélection est propre à chaque
+  utilisateur et le suit d’un appareil à l’autre ;
+- **identité** : un code d’accès `nom:secret` par personne, créé par l’administrateur
+  (`runbpm_server.py adduser`) ; le serveur n’en garde que l’empreinte SHA-256.
 
-Configuration, par variables d’environnement ou fichier `runbpm.config.json` (voir
-`runbpm.config.example.json`) :
+API (`/api/…`, en-tête `X-RunBPM-Key`) : `health`, `whoami`, `songs` (GET, `?since=` ; POST par lots),
+`songs/<id>` (PATCH du BPM), `selection` (GET, PUT). CORS ouvert : aucune donnée de session n’est
+transmise par cookie.
 
-| Variable | Clé du fichier | Défaut | Rôle |
-|---|---|---|---|
-| `NAVIDROME_URL` | `navidromeUrl` | — (base désactivée) | serveur qui authentifie les utilisateurs |
-| `RUNBPM_DATA` | `dataFile` | `data/runbpm-db.json` | fichier de la base (écriture atomique) |
-| `PORT` / `HOST` | `port` / `host` | `8080` / `0.0.0.0` | pour `npm start` |
-
-Sans serveur (site statique), tout fonctionne comme avant : bibliothèque et sélection restent dans le
-navigateur. L’adresse saisie dans RunBPM doit désigner le même Navidrome que `NAVIDROME_URL` (le
-jeton est vérifié par celui-ci).
+Sans base partagée, tout fonctionne comme avant : bibliothèque et sélection restent dans l’appareil.
 
 ### Spotify
 « Créer la playlist Spotify » cherche chaque morceau sur Spotify (titre, artiste, durée ; seules les
@@ -261,17 +319,21 @@ src/ui/            interface (TypeScript sans framework)
   player.ts          lecteur interne (flux du serveur, ajustement du tempo, métronome superposé)
   profiles.ts        profils coureur et calibrage
   libraryView.ts     tableau de la bibliothèque (correction des BPM, morceaux cochés)
-  selection.ts       sélection « course » (navigateur + serveur)
+  selection.ts       sélection « course » (appareil + serveur)
+  sharedPanel.ts     réglage de la base partagée (adresse, code d’accès)
+  native.ts          pont vers l’application Android (service de course, écran allumé)
   companion.ts       compagnon de course (chronomètre / synchro Spotify, Wake Lock)
   metronome.ts       métronome Web Audio
   spotifyPanel.ts    connexion Spotify
   chart.ts           graphique SVG
 tests/             tests vitest (dont signaux et fichiers audio synthétiques)
 scripts/generate-samples.mjs   régénère les fichiers d’exemple
-server/            serveur optionnel (Node, sans dépendance)
-  api.mjs            API de la base partagée (/api/health, songs, selection)
-  config.mjs         configuration (variables d’environnement ou runbpm.config.json)
-  index.mjs          serveur autonome : API + dist/ (npm start)
+server/            base partagée (Python, bibliothèque standard)
+  runbpm_server.py   application WSGI + SQLite + commandes (adduser, serve, export…)
+  pythonanywhere_wsgi.py  modèle de fichier WSGI pour PythonAnywhere
+  test_runbpm_server.py   tests (python -m unittest discover -s server)
+android/           application Android (Capacitor) : service « course en cours »
+.github/workflows/android.yml  tests + construction et publication de l’APK
 ```
 
 ## Pistes d’évolution
