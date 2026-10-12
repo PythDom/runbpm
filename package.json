@@ -10,12 +10,22 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "samples": "node scripts/generate-samples.mjs"
+    "samples": "node scripts/generate-samples.mjs",
+    "server": "python server/runbpm_server.py serve",
+    "test:server": "python -m unittest discover -s server"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
     "@types/node": "^22.20.4",
     "typescript": "~5.9.3",
     "vite": "^8.3.1",
     "vitest": "^5.0.2"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/core": "^8.5.3"
   }
 }

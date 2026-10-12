@@ -68,6 +68,11 @@
   box-sizing: border-box;
 }
 
+/* L'attribut hidden l'emporte sur les display: flex/grid des composants. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -813,6 +818,18 @@ input.bpm-edit {
   margin-left: 6px;
 }
 
+.lib-table .sel-col {
+  width: 28px;
+  text-align: center;
+}
+
+.lib-table .sel-col input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 tr.doubtful td {
   background: color-mix(in srgb, var(--warn) 8%, transparent);
 }
@@ -874,4 +891,81 @@ tr.doubtful td {
 input:disabled {
   opacity: 0.75;
   cursor: not-allowed;
+}
+
+#profile-form input {
+  flex: 1 1 140px;
+  width: auto;
+  margin-top: 0;
+}
+
+button[data-armed='1'] {
+  color: var(--error-text);
+  font-weight: 600;
+}
+
+/* ---------- Règles par pente ---------- */
+
+.slope-rules {
+  margin-top: 10px;
+}
+
+.rules-table {
+  font-size: 0.85rem;
+}
+
+.rules-table th {
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rules-table th span {
+  display: block;
+  font-weight: 400;
+}
+
+.rules-table td {
+  white-space: normal;
+  vertical-align: top;
+}
+
+.rules-table td.rule-value {
+  white-space: nowrap;
+}
+
+.rules-table input {
+  display: inline-block;
+  width: 64px;
+  margin: 0 4px;
+  padding: 4px 6px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rules-table input.changed {
+  border-color: var(--accent);
+}
+
+.rule-unit {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.run-tip {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.shared-panel {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.shared-panel summary {
+  cursor: pointer;
+  font-size: 0.92em;
 }

@@ -12,7 +12,12 @@ import { RunCompanion, type CompanionSnapshot } from './companion';
 import { LibraryView, LOW_CONFIDENCE, NO_PULSE } from './libraryView';
 import { importNavidrome } from './navidromeImport';
 import { NavidromePanel } from './navidromePanel';
+import { Selection } from './selection';
+import { SharedPanel } from './sharedPanel';
+import { setRunActive } from './native';
+import { mergeShared, toShared, type SharedDb, type SharedSong } from '../services/sharedDb';
 import { RunPlayer, type PlayerSnapshot, type PlayerTrack } from './player';
+import { confirmClick } from './confirm';
 import { ProfilePanel } from './profiles';
 import { SpotifyPanel } from './spotifyPanel';
 
@@ -24,7 +29,7 @@ const LIBRARY_KEY = 'runbpm.library';
 const SERVICE_KEY = 'runbpm.service';
 /** Réglages du formulaire conservés pendant l'aller-retour de connexion à Spotify. */
 // (cadence de base et coefficients de pente sont mémorisés dans le profil coureur)
-const SETTINGS_IDS = ['pace', 'speed', 'mode', 'tolerance', 'stretch', 'half-time', 'repeat', 'use-tag-bpm', 'm-volume', 'm-overlay', 'm-offset', 'keep-awake'];
+const SETTINGS_IDS = ['pace', 'speed', 'mode', 'tolerance', 'stretch', 'half-time', 'repeat', 'only-selected', 'use-tag-bpm', 'm-volume', 'm-overlay', 'm-offset', 'keep-awake'];
 const PENDING_KEY = 'runbpm.pending';
 
 const state: {
@@ -165,11 +170,14 @@ const profiles = new ProfilePanel(
     calibration: $('calibration'),
     hint: $('calibration-hint'),
     baseCadence: $<HTMLInputElement>('base-cadence'),
-    uphill: $<HTMLInputElement>('uphill'),
-    downhill: $<HTMLInputElement>('downhill'),
+    rules: $('slope-rules'),
     newBtn: $('profile-new'),
     renameBtn: $('profile-rename'),
     deleteBtn: $('profile-delete'),
+    nameForm: $('profile-form'),
+    nameInput: $<HTMLInputElement>('profile-name'),
+    nameSave: $('profile-name-save'),
+    nameCancel: $('profile-name-cancel'),
   },
   () => update(),
 );
@@ -191,15 +199,23 @@ speedInput.addEventListener('input', () => {
 
 // ---------- Bibliothèque ----------
 
-const libraryView = new LibraryView(
-  $('library-view'),
+// Morceaux cochés « pour courir » : dans ce navigateur, et sur le serveur RunBPM s'il y en a un.
+const selection = new Selection(
   () => state.library,
-  () => {
-    saveLibrary();
-    renderLibrarySummary();
-    update();
-  },
+  (msg) => libraryView.setNote(`Sélection non enregistrée sur le serveur : ${msg}`),
 );
+/** Base partagée du serveur RunBPM, quand il en sert une et que Navidrome est connecté. */
+let shared: SharedDb | undefined;
+
+const libraryView = new LibraryView($('library-view'), () => state.library, selection, (edit) => {
+  if (edit.edited?.navidromeId && shared) {
+    const song = edit.edited;
+    shared.setBpm(song.navidromeId!, song.bpm).catch((e: Error) => libraryView.setNote(`Correction non partagée : ${e.message}`));
+  }
+  if (!edit.selection) saveLibrary();
+  renderLibrarySummary();
+  update();
+});
 
 function renderLibrarySummary(): void {
   const el = $('library-summary');
@@ -254,9 +270,12 @@ $('library-demo').addEventListener('click', () => {
 });
 
 $('library-clear').addEventListener('click', () => {
-  if (state.library.length > 20 && !confirm(`Retirer les ${state.library.length} morceaux de la bibliothèque ?`)) return;
-  state.library = [];
-  libraryChanged();
+  const clear = () => {
+    state.library = [];
+    libraryChanged();
+  };
+  if (state.library.length > 20) confirmClick($('library-clear'), `Retirer les ${state.library.length} morceaux ?`, clear);
+  else clear();
 });
 
 // ---------- Analyse des fichiers audio ----------
@@ -346,12 +365,55 @@ const spotify = new SpotifyPanel($('spotify-panel'), {
 let navidromeImport: { cancelled: boolean } | undefined;
 
 const navidrome = new NavidromePanel($('navidrome-panel'), {
-  onConnectionChange: () => update(),
+  onConnectionChange: () => {
+    update();
+    void syncShared();
+  },
   onImport: () => void runNavidromeImport(),
   onStopImport: () => {
     if (navidromeImport) navidromeImport.cancelled = true;
   },
 });
+
+/**
+ * Base partagée : à la connexion à Navidrome, récupère les BPM déjà mesurés (par n'importe quel
+ * utilisateur) et la sélection de l'utilisateur ; envoie les morceaux mesurés ici et absents du serveur.
+ */
+let syncRun = 0;
+async function syncShared(): Promise<void> {
+  const run = ++syncRun;
+  const client = navidrome.client;
+  const db = sharedPanel.db();
+  shared = undefined;
+  selection.detach();
+  if (!db) return;
+  if (!client) {
+    sharedPanel.setInfo('Connectez-vous à Navidrome pour utiliser la base partagée.');
+    return;
+  }
+  try {
+    sharedPanel.setInfo('Synchronisation…');
+    const remote = await db.songs();
+    if (run !== syncRun) return;
+    const merged = mergeShared(state.library, remote);
+    state.library = merged.library;
+    const sent = merged.toUpload.length ? await db.upsert(merged.toUpload) : undefined;
+    shared = db;
+    await selection.attach(db);
+    sharedPanel.setInfo(
+      `${sent?.total ?? remote.length} morceau(x) mesuré(s)` +
+        (merged.received ? ` · ${merged.received} reçu(s)` : '') +
+        (merged.toUpload.length ? ` · ${merged.toUpload.length} envoyé(s)` : '') +
+        '. L’import ne mesure que les morceaux absents de la base.',
+    );
+  } catch (e) {
+    sharedPanel.setInfo(`Base partagée indisponible : ${(e as Error).message}`, true);
+  } finally {
+    if (run === syncRun) libraryChanged();
+  }
+}
+
+const sharedPanel = new SharedPanel($('shared-panel'), () => void syncShared());
 
 async function runNavidromeImport(): Promise<void> {
   const client = navidrome.client;
@@ -360,6 +422,16 @@ async function runNavidromeImport(): Promise<void> {
   navidromeImport = signal;
   let sinceSave = 0;
   const started = performance.now();
+  // Morceaux mesurés à envoyer à la base partagée, par paquets.
+  let outbox: SharedSong[] = [];
+  let shareError = '';
+  const share = async () => {
+    const db = shared;
+    if (!db || outbox.length === 0) return;
+    const batch = outbox;
+    outbox = [];
+    await db.upsert(batch).catch((e: Error) => (shareError = e.message));
+  };
   try {
     const { progress, errors } = await importNavidrome(
       client,
@@ -367,10 +439,13 @@ async function runNavidromeImport(): Promise<void> {
       { useTagBpm: $<HTMLInputElement>('use-tag-bpm').checked },
       (song) => {
         state.library = mergeLibraries(state.library, [song]);
+        const s = toShared(song);
+        if (s) outbox.push(s);
         if (++sinceSave >= 20) {
           sinceSave = 0;
           saveLibrary();
           renderLibrarySummary();
+          void share();
         }
       },
       (p) => {
@@ -387,11 +462,18 @@ async function runNavidromeImport(): Promise<void> {
       },
       signal,
     );
+    await share();
+    // Morceaux existants reliés au serveur pendant l'import : on les partage aussi.
+    if (shared) {
+      const linked = state.library.map(toShared).filter((s): s is SharedSong => !!s);
+      await shared.upsert(linked).catch((e: Error) => (shareError = e.message));
+    }
     const summary =
       `Import ${signal.cancelled ? 'interrompu' : 'terminé'} : ${progress.added} morceau(x) ajouté(s)` +
       (progress.linked ? `, ${progress.linked} déjà connu(s) relié(s) au serveur` : '') +
       (progress.failed ? `, ${progress.failed} ignoré(s)` : '') +
-      '.';
+      '.' +
+      (shared ? (shareError ? ` Base partagée non mise à jour : ${shareError}` : ' Base partagée à jour.') : '');
     navidrome.setImportProgress(undefined, summary);
     if (errors.length) showMessages([], [`Morceaux ignorés : ${errors.slice(0, 5).join(' ; ')}${errors.length > 5 ? ` ; … (${errors.length - 5} autres)` : ''}`]);
   } catch (e) {
@@ -422,6 +504,7 @@ $('create-navidrome').addEventListener('click', async () => {
 function renderService(): void {
   const s = service();
   $('navidrome-panel').hidden = s !== 'navidrome';
+  $('shared-panel').hidden = s !== 'navidrome';
   $('stretch-row').hidden = s !== 'navidrome';
   $('overlay-row').hidden = s !== 'navidrome';
   $('offset-row').hidden = s !== 'navidrome';
@@ -499,7 +582,7 @@ $('export-deezer').addEventListener('click', () => {
 
 // ---------- Calcul et rendu ----------
 
-for (const id of ['mode', 'base-cadence', 'uphill', 'downhill', 'tolerance', 'stretch', 'half-time', 'repeat']) {
+for (const id of ['mode', 'base-cadence', 'tolerance', 'stretch', 'half-time', 'repeat', 'only-selected']) {
   $(id).addEventListener('input', () => update());
   $(id).addEventListener('change', () => update());
 }
@@ -523,12 +606,20 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   // On écarte les morceaux sans pulsation détectée ; pour Spotify, ceux qu'il ne propose pas ;
   // pour Navidrome, ceux qui ne sont pas sur le serveur.
   const notFound = svc === 'spotify' ? spotify.notFound() : new Set<string>();
-  const library = state.library.filter(
+  let library = state.library.filter(
     (s) =>
       !notFound.has(s.id) &&
       !(s.confidence !== undefined && s.confidence < NO_PULSE) &&
       (svc !== 'navidrome' || (navidrome.connected && !!s.navidromeId)),
   );
+  // Morceaux cochés seulement (ignoré tant qu'aucun morceau utilisable n'est coché).
+  const onlySelected = $<HTMLInputElement>('only-selected').checked;
+  const picked = library.filter((s) => selection.has(s));
+  $('only-selected-info').textContent = `(${picked.length} utilisable(s))`;
+  if (onlySelected && picked.length > 0) library = picked;
+  else if (onlySelected && library.length > 0) {
+    extraWarnings = [...extraWarnings, 'Aucun morceau coché utilisable : cochez des morceaux dans la Bibliothèque. Tous les morceaux sont proposés en attendant.'];
+  }
   if (svc === 'navidrome' && state.library.length > 0 && library.length === 0) {
     extraWarnings = [
       ...extraWarnings,
@@ -555,11 +646,10 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   const plan = planRun(sections, {
     targetPace: pace,
     mode: $<HTMLSelectElement>('mode').value as PacingMode,
-    ...(profiles.planOptions(3600 / pace) ?? {
-      baseCadence: Number.isFinite(baseCadence) ? baseCadence : undefined,
-      uphillSensitivity: numberInput('uphill', 0.6),
-      downhillSensitivity: numberInput('downhill', 0.3),
-    }),
+    // X : cadence au plat (calibrage du profil, saisie manuelle ou estimation) ; la pente suit les
+    // règles par tranche du profil.
+    ...(profiles.planOptions(3600 / pace) ?? { baseCadence: Number.isFinite(baseCadence) ? baseCadence : undefined }),
+    slopeRules: profiles.slopeRules(),
   });
   // Les applications de streaming jouent au tempo original ; seul le lecteur interne (Navidrome)
   // peut ajuster la vitesse de lecture.
@@ -618,6 +708,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
         <td>${km(s.startDist, 1)} → ${km(s.endDist, 1)}</td>
         <td class="num">${Math.round(s.length)} m</td>
         <td class="num">${s.grade >= 0 ? '+' : ''}${(s.grade * 100).toFixed(1)} %</td>
+        <td title="${esc(ruleById(s.ruleId)?.tip ?? '')}">${esc(ruleById(s.ruleId)?.label ?? '')}</td>
         <td class="num">${formatPace(s.pace)} /km</td>
         <td class="num strong">${s.cadence}</td>
         <td class="num">${formatDuration(s.startTime)}</td>
@@ -658,6 +749,19 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
 
 // ---------- Pendant la course ----------
 
+function ruleById(id: string | undefined) {
+  return id ? profiles.slopeRules().find((r) => r.id === id) : undefined;
+}
+
+/** Conseil de la tranche de pente en cours (rien sur le plat). */
+function showTip(plan: RunPlan, runTime: number): void {
+  const section = plan.sections.find((s) => runTime < s.endTime) ?? plan.sections[plan.sections.length - 1];
+  const rule = ruleById(section?.ruleId);
+  const el = $('run-tip');
+  el.hidden = !rule || rule.id === 'flat' || runTime >= plan.totalTime;
+  el.innerHTML = rule ? `<strong>${esc(rule.label)}</strong> · ${esc(rule.tip)}` : '';
+}
+
 const companion = new RunCompanion((snap) => renderRun(snap));
 
 /** Recharge le compagnon seulement si la playlist a changé (évite de l'arrêter en pleine course). */
@@ -679,6 +783,7 @@ const SYNC_LABEL: Record<CompanionSnapshot['sync'], string> = {
 
 function renderRun(snap: CompanionSnapshot): void {
   if (service() === 'navidrome') return;
+  setRunActive(snap.running, 'Métronome', $<HTMLInputElement>('keep-awake').checked);
   $('run-help').classList.remove('error-text');
   const current = state.current;
   const toggle = $('run-toggle');
@@ -703,6 +808,7 @@ function renderRun(snap: CompanionSnapshot): void {
     $('run-cad').textContent = String(Math.round(entry.effectiveCadence));
     const d = distanceAt(current.plan, snap.runTime);
     $('run-km').textContent = snap.runTime >= current.plan.totalTime ? 'Arrivée !' : `km ${km(d, 1)} · cible ${cadenceAt(current.plan, snap.runTime)} pas/min`;
+    showTip(current.plan, snap.runTime);
   }
   $('run-cad').classList.toggle('silent', !snap.clicking);
 
@@ -733,6 +839,7 @@ function stopOtherMode(): void {
 
 function renderPlayerRun(snap: PlayerSnapshot): void {
   if (service() !== 'navidrome') return;
+  setRunActive(snap.playing, 'Musique au tempo de votre cadence', $<HTMLInputElement>('keep-awake').checked);
   const current = state.current;
   const toggle = $('run-toggle');
   toggle.classList.toggle('playing', snap.playing);
@@ -764,6 +871,7 @@ function renderPlayerRun(snap: PlayerSnapshot): void {
     $('run-cad').textContent = String(Math.round(entry.effectiveCadence));
     $('run-time').textContent = formatDuration(runTime);
     $('run-km').textContent = runTime >= current.plan.totalTime ? 'Arrivée !' : `km ${km(distanceAt(current.plan, runTime), 1)} · cible ${cadenceAt(current.plan, runTime)} pas/min`;
+    showTip(current.plan, runTime);
   }
   $('run-cad').classList.toggle('silent', !snap.playing);
   if (!seeking) runSeek.value = String(snap.duration > 0 ? Math.round((snap.position / snap.duration) * 1000) : 0);

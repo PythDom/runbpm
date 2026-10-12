@@ -132,7 +132,7 @@ export class NavidromePanel {
       this.root.innerHTML = `
         <p class="muted small">Lecture dans RunBPM depuis votre serveur, <strong>avec ajustement du tempo</strong>.</p>
         <label>Adresse du serveur
-          <input type="text" id="nd-url" value="${esc(saved?.url ?? '')}" placeholder="http://192.168.1.10:4533" autocomplete="url" spellcheck="false" />
+          <input type="text" id="nd-url" value="${esc(saved?.url ?? import.meta.env.VITE_NAVIDROME_URL ?? '')}" placeholder="http://192.168.1.10:4533" autocomplete="url" spellcheck="false" />
         </label>
         <div class="grid2">
           <label>Utilisateur
