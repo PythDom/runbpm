@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Song } from '../src/core/library';
-import { mergeShared, SharedDb, type SharedSong } from '../src/services/sharedDb';
+import { mergeShared, normalizeServerUrl, SharedDb, type SharedSong } from '../src/services/sharedDb';
 
 const remote = (id: string, bpm: number, extra: Partial<SharedSong> = {}): SharedSong => ({
   id, title: `T${id}`, artist: 'A', duration: 200, bpm, bpmSource: 'analyse', confidence: 0.5, ...extra,
@@ -37,22 +37,30 @@ describe('mergeShared', () => {
 });
 
 describe('SharedDb', () => {
-  it('transmet le jeton Subsonic, jamais de mot de passe', async () => {
+  it('normalise l’adresse du serveur', () => {
+    expect(normalizeServerUrl('moi.pythonanywhere.com/')).toBe('https://moi.pythonanywhere.com');
+    expect(normalizeServerUrl('https://moi.pythonanywhere.com/api/')).toBe('https://moi.pythonanywhere.com');
+    expect(normalizeServerUrl('127.0.0.1:8000')).toBe('http://127.0.0.1:8000');
+    expect(normalizeServerUrl('192.168.1.5:8000')).toBe('http://192.168.1.5:8000');
+  });
+
+  it('transmet le code d’accès dans un en-tête', async () => {
     const f = vi.fn(async () => new Response(JSON.stringify({ songs: [] }), { headers: { 'Content-Type': 'application/json' } }));
-    const db = new SharedDb({ url: 'http://nd', user: 'alice', token: 'abc', salt: 'xyz' }, f as unknown as typeof fetch, '/api/');
+    const db = new SharedDb('moi.pythonanywhere.com', 'alice:s3cret', f as unknown as typeof fetch);
     await db.songs();
     const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe('/api/songs');
-    expect((init.headers as Record<string, string>)['X-RunBPM-Auth']).toBe('u=alice&t=abc&s=xyz');
+    expect(url).toBe('https://moi.pythonanywhere.com/api/songs');
+    expect((init.headers as Record<string, string>)['X-RunBPM-Key']).toBe('alice:s3cret');
+    expect(db.user).toBe('alice');
   });
 
   it('health : undefined quand l’API n’est pas servie', async () => {
     const html = vi.fn(async () => new Response('<!doctype html>', { headers: { 'Content-Type': 'text/html' } }));
-    expect(await SharedDb.health(html as unknown as typeof fetch)).toBeUndefined();
+    expect(await SharedDb.health('x.org', html as unknown as typeof fetch)).toBeUndefined();
     const down = vi.fn(async () => {
       throw new TypeError('network');
     });
-    expect(await SharedDb.health(down as unknown as typeof fetch)).toBeUndefined();
+    expect(await SharedDb.health('x.org', down as unknown as typeof fetch)).toBeUndefined();
   });
 
   it('upsert par lots', async () => {
@@ -60,7 +68,7 @@ describe('SharedDb', () => {
       const n = JSON.parse(String(init.body)).songs.length;
       return new Response(JSON.stringify({ added: n, updated: 0, total: n }));
     });
-    const db = new SharedDb({ url: 'http://nd', user: 'u', token: 't', salt: 's' }, f as unknown as typeof fetch);
+    const db = new SharedDb('x.org', 'u:k', f as unknown as typeof fetch);
     const r = await db.upsert(Array.from({ length: 1201 }, (_, i) => remote(String(i), 170)));
     expect(f).toHaveBeenCalledTimes(3);
     expect(r.added).toBe(1201);

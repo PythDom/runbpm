@@ -13,7 +13,8 @@ import { LibraryView, LOW_CONFIDENCE, NO_PULSE } from './libraryView';
 import { importNavidrome } from './navidromeImport';
 import { NavidromePanel } from './navidromePanel';
 import { Selection } from './selection';
-import { mergeShared, SharedDb, toShared, type SharedSong } from '../services/sharedDb';
+import { SharedPanel } from './sharedPanel';
+import { mergeShared, toShared, type SharedDb, type SharedSong } from '../services/sharedDb';
 import { RunPlayer, type PlayerSnapshot, type PlayerTrack } from './player';
 import { confirmClick } from './confirm';
 import { ProfilePanel } from './profiles';
@@ -377,44 +378,41 @@ const navidrome = new NavidromePanel($('navidrome-panel'), {
  * Base partagée : à la connexion à Navidrome, récupère les BPM déjà mesurés (par n'importe quel
  * utilisateur) et la sélection de l'utilisateur ; envoie les morceaux mesurés ici et absents du serveur.
  */
+let syncRun = 0;
 async function syncShared(): Promise<void> {
+  const run = ++syncRun;
   const client = navidrome.client;
+  const db = sharedPanel.db();
   shared = undefined;
   selection.detach();
+  if (!db) return;
   if (!client) {
-    navidrome.setSharedInfo('');
+    sharedPanel.setInfo('Connectez-vous à Navidrome pour utiliser la base partagée.');
     return;
   }
-  const health = await SharedDb.health();
-  if (!health) {
-    navidrome.setSharedInfo('Pas de base partagée (RunBPM servi sans son serveur) : bibliothèque et sélection restent dans ce navigateur.');
-    return;
-  }
-  if (!health.configured) {
-    navidrome.setSharedInfo('Base partagée désactivée : définissez NAVIDROME_URL au démarrage du serveur RunBPM.');
-    return;
-  }
-  const db = new SharedDb(client.creds);
   try {
-    navidrome.setSharedInfo('Base partagée : synchronisation…');
-    const merged = mergeShared(state.library, await db.songs());
+    sharedPanel.setInfo('Synchronisation…');
+    const remote = await db.songs();
+    if (run !== syncRun) return;
+    const merged = mergeShared(state.library, remote);
     state.library = merged.library;
     const sent = merged.toUpload.length ? await db.upsert(merged.toUpload) : undefined;
     shared = db;
     await selection.attach(db);
-    const total = sent?.total ?? health.songs;
-    navidrome.setSharedInfo(
-      `Base partagée : ${total} morceau(x) mesuré(s)` +
+    sharedPanel.setInfo(
+      `${sent?.total ?? remote.length} morceau(x) mesuré(s)` +
         (merged.received ? ` · ${merged.received} reçu(s)` : '') +
         (merged.toUpload.length ? ` · ${merged.toUpload.length} envoyé(s)` : '') +
         '. L’import ne mesure que les morceaux absents de la base.',
     );
   } catch (e) {
-    navidrome.setSharedInfo(`Base partagée indisponible : ${(e as Error).message}`, true);
+    sharedPanel.setInfo(`Base partagée indisponible : ${(e as Error).message}`, true);
   } finally {
-    libraryChanged();
+    if (run === syncRun) libraryChanged();
   }
 }
+
+const sharedPanel = new SharedPanel($('shared-panel'), () => void syncShared());
 
 async function runNavidromeImport(): Promise<void> {
   const client = navidrome.client;
@@ -505,6 +503,7 @@ $('create-navidrome').addEventListener('click', async () => {
 function renderService(): void {
   const s = service();
   $('navidrome-panel').hidden = s !== 'navidrome';
+  $('shared-panel').hidden = s !== 'navidrome';
   $('stretch-row').hidden = s !== 'navidrome';
   $('overlay-row').hidden = s !== 'navidrome';
   $('offset-row').hidden = s !== 'navidrome';

@@ -1,10 +1,9 @@
 import type { Song } from '../core/library';
-import type { SubsonicCredentials } from './subsonic';
 
 /**
- * Client de la base partagée servie par RunBPM (server/api.mjs) : BPM des morceaux Navidrome
- * mesurés une fois pour tous les utilisateurs, et sélection « course » de chacun.
- * L'identité est celle de Navidrome : on transmet le jeton Subsonic, jamais le mot de passe.
+ * Client de la base partagée (server/runbpm_server.py, hébergé par exemple sur PythonAnywhere) :
+ * BPM des morceaux Navidrome mesurés une fois pour tous les utilisateurs, et sélection « course »
+ * de chacun. Chaque utilisateur s'identifie avec son code d'accès « nom:secret ».
  */
 
 export interface SharedSong {
@@ -22,8 +21,6 @@ export interface SharedSong {
 
 export interface SharedHealth {
   ok: boolean;
-  configured: boolean;
-  navidrome: string | null;
   songs: number;
 }
 
@@ -66,17 +63,34 @@ export function fromShared(s: SharedSong): Song {
   };
 }
 
-export class SharedDb {
-  constructor(
-    private readonly creds: SubsonicCredentials,
-    private readonly fetchImpl: Fetch = (...args) => fetch(...args),
-    private readonly base = 'api/',
-  ) {}
+/** Adresse du serveur normalisée : schéma ajouté (https par défaut), sans « / » ni « /api » final. */
+export function normalizeServerUrl(url: string): string {
+  let u = url.trim().replace(/\/+$/, '').replace(/\/api$/, '');
+  if (u && !/^https?:\/\//i.test(u)) u = `${/^(localhost|127\.|192\.168\.|10\.)/.test(u) ? 'http' : 'https'}://${u}`;
+  return u;
+}
 
-  /** État du serveur RunBPM ; undefined si l'API n'est pas servie (site statique, artefact…). */
-  static async health(fetchImpl: Fetch = (...args) => fetch(...args), base = 'api/'): Promise<SharedHealth | undefined> {
+export class SharedDb {
+  private readonly base: string;
+
+  constructor(
+    serverUrl: string,
+    /** Code d'accès « nom:secret » remis par l'administrateur de la base. */
+    private readonly code: string,
+    private readonly fetchImpl: Fetch = (...args) => fetch(...args),
+  ) {
+    this.base = `${normalizeServerUrl(serverUrl)}/api/`;
+  }
+
+  /** Nom d'utilisateur contenu dans le code d'accès. */
+  get user(): string {
+    return this.code.split(':')[0];
+  }
+
+  /** État du serveur ; undefined s'il ne répond pas comme une base RunBPM. */
+  static async health(serverUrl: string, fetchImpl: Fetch = (...args) => fetch(...args)): Promise<SharedHealth | undefined> {
     try {
-      const res = await fetchImpl(`${base}health`, { cache: 'no-store' });
+      const res = await fetchImpl(`${normalizeServerUrl(serverUrl)}/api/health`, { cache: 'no-store' });
       if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return undefined;
       const body = (await res.json()) as SharedHealth;
       return body?.ok ? body : undefined;
@@ -86,20 +100,24 @@ export class SharedDb {
   }
 
   private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const auth = new URLSearchParams({ u: this.creds.user, t: this.creds.token, s: this.creds.salt }).toString();
     let res: Response;
     try {
       res = await this.fetchImpl(this.base + path, {
         method,
-        headers: { 'X-RunBPM-Auth': auth, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        headers: { 'X-RunBPM-Key': this.code, ...(body ? { 'Content-Type': 'application/json' } : {}) },
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch {
-      throw new SharedDbError('Serveur RunBPM injoignable.', 0);
+      throw new SharedDbError('Base partagée injoignable (réseau ou adresse).', 0);
     }
     const data = (await res.json().catch(() => ({}))) as T & { error?: string };
     if (!res.ok) throw new SharedDbError(data.error ?? `Base partagée : erreur ${res.status}.`, res.status);
     return data;
+  }
+
+  /** Vérifie le code d'accès ; renvoie le nom d'utilisateur. */
+  async whoami(): Promise<string> {
+    return (await this.call<{ user: string }>('GET', 'whoami')).user;
   }
 
   async songs(): Promise<SharedSong[]> {

@@ -11,7 +11,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "samples": "node scripts/generate-samples.mjs",
-    "start": "node server/index.mjs"
+    "server": "python server/runbpm_server.py serve",
+    "test:server": "python -m unittest discover -s server"
   },
   "devDependencies": {
     "@types/node": "^22.20.4",
