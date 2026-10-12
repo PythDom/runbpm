@@ -14,6 +14,7 @@ import { importNavidrome } from './navidromeImport';
 import { NavidromePanel } from './navidromePanel';
 import { Selection } from './selection';
 import { SharedPanel } from './sharedPanel';
+import { setRunActive } from './native';
 import { mergeShared, toShared, type SharedDb, type SharedSong } from '../services/sharedDb';
 import { RunPlayer, type PlayerSnapshot, type PlayerTrack } from './player';
 import { confirmClick } from './confirm';
@@ -782,6 +783,7 @@ const SYNC_LABEL: Record<CompanionSnapshot['sync'], string> = {
 
 function renderRun(snap: CompanionSnapshot): void {
   if (service() === 'navidrome') return;
+  setRunActive(snap.running, 'Métronome', $<HTMLInputElement>('keep-awake').checked);
   $('run-help').classList.remove('error-text');
   const current = state.current;
   const toggle = $('run-toggle');
@@ -837,6 +839,7 @@ function stopOtherMode(): void {
 
 function renderPlayerRun(snap: PlayerSnapshot): void {
   if (service() !== 'navidrome') return;
+  setRunActive(snap.playing, 'Musique au tempo de votre cadence', $<HTMLInputElement>('keep-awake').checked);
   const current = state.current;
   const toggle = $('run-toggle');
   toggle.classList.toggle('playing', snap.playing);

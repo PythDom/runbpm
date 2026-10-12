@@ -1,0 +1,11 @@
+{
+  "appId": "io.github.pythdom.runbpm",
+  "appName": "RunBPM",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "http"
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

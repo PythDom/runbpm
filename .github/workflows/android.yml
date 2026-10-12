@@ -1,0 +1,67 @@
+name: Android APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Tests
+        run: |
+          npm test
+          python3 -m unittest discover -s server
+
+      - name: Build web app
+        run: npm run build
+        env:
+          # Adresses proposées par défaut dans l'application (Settings › Secrets and variables › Actions › Variables).
+          VITE_RUNBPM_SERVER: ${{ vars.RUNBPM_SERVER }}
+          VITE_NAVIDROME_URL: ${{ vars.NAVIDROME_URL }}
+
+      - run: npx cap sync android
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      - name: Build APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - run: cp android/app/build/outputs/apk/release/app-release.apk RunBPM.apk
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: RunBPM-apk
+          path: RunBPM.apk
+
+      - name: Publish the download link
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete android-latest --yes --cleanup-tag || true
+          gh release create android-latest RunBPM.apk --prerelease --target "$GITHUB_SHA" \
+            --title "RunBPM pour Android (dernière version)" \
+            --notes "Version ${GITHUB_RUN_NUMBER} ($(git log -1 --format=%h)). Sur le téléphone : téléchargez RunBPM.apk, ouvrez-le et autorisez l’installation depuis cette source. Les mises à jour s’installent par-dessus, sans perdre les réglages."
