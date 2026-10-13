@@ -28,6 +28,12 @@ describe('mergeShared', () => {
     expect(r.library[0]).toMatchObject({ bpm: 172, bpmSource: 'manuel' });
   });
 
+  it('un morceau douteux corrigé ailleurs ne l’est plus ici', () => {
+    const r = mergeShared([local('1', 86, { confidence: 0.3 })], [remote('1', 172, { bpmSource: 'manuel', confidence: undefined })]);
+    expect(r.library[0]).toMatchObject({ bpm: 172, bpmSource: 'manuel' });
+    expect(r.library[0].confidence).toBeUndefined();
+  });
+
   it('relie un morceau local de même titre et artiste sans le dupliquer', () => {
     const file: Song = { id: 'f1', title: 'T7', artist: 'A', duration: 200, bpm: 150, bpmSource: 'analyse', fileKey: 'x' };
     const r = mergeShared([file], [remote('7', 176)]);

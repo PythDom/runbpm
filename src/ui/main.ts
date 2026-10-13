@@ -9,7 +9,7 @@ import { elevationStats, smoothedProfile, splitSections } from '../core/sections
 import { analyzeFiles, fileKey } from './analyzer';
 import { renderChart } from './chart';
 import { RunCompanion, type CompanionSnapshot } from './companion';
-import { LibraryView, LOW_CONFIDENCE, NO_PULSE } from './libraryView';
+import { isDoubtful, LibraryView, NO_PULSE } from './libraryView';
 import { importNavidrome } from './navidromeImport';
 import { NavidromePanel } from './navidromePanel';
 import { Selection } from './selection';
@@ -29,7 +29,7 @@ const LIBRARY_KEY = 'runbpm.library';
 const SERVICE_KEY = 'runbpm.service';
 /** Réglages du formulaire conservés pendant l'aller-retour de connexion à Spotify. */
 // (cadence de base et coefficients de pente sont mémorisés dans le profil coureur)
-const SETTINGS_IDS = ['pace', 'speed', 'mode', 'tolerance', 'stretch', 'half-time', 'repeat', 'only-selected', 'use-tag-bpm', 'm-volume', 'm-overlay', 'm-offset', 'keep-awake'];
+const SETTINGS_IDS = ['pace', 'speed', 'mode', 'tolerance', 'stretch', 'half-time', 'repeat', 'hide-doubtful', 'only-selected', 'use-tag-bpm', 'm-volume', 'm-overlay', 'm-offset', 'keep-awake'];
 const PENDING_KEY = 'runbpm.pending';
 
 const state: {
@@ -207,6 +207,25 @@ const selection = new Selection(
 /** Base partagée du serveur RunBPM, quand il en sert une et que Navidrome est connecté. */
 let shared: SharedDb | undefined;
 
+// Morceaux douteux masqués (bibliothèque et playlists) : préférence gardée sur l'appareil.
+const HIDE_DOUBTFUL_KEY = 'runbpm.hideDoubtful';
+const hideDoubtful = () => $<HTMLInputElement>('hide-doubtful').checked;
+try {
+  if (localStorage.getItem(HIDE_DOUBTFUL_KEY) === '0') $<HTMLInputElement>('hide-doubtful').checked = false;
+} catch {
+  /* préférence indisponible */
+}
+$('hide-doubtful').addEventListener('change', () => {
+  try {
+    localStorage.setItem(HIDE_DOUBTFUL_KEY, hideDoubtful() ? '1' : '0');
+  } catch {
+    /* préférence non enregistrée */
+  }
+  renderLibrarySummary();
+  libraryView.render();
+  update();
+});
+
 const libraryView = new LibraryView($('library-view'), () => state.library, selection, (edit) => {
   if (edit.edited?.navidromeId && shared) {
     const song = edit.edited;
@@ -215,7 +234,7 @@ const libraryView = new LibraryView($('library-view'), () => state.library, sele
   if (!edit.selection) saveLibrary();
   renderLibrarySummary();
   update();
-});
+}, hideDoubtful);
 
 function renderLibrarySummary(): void {
   const el = $('library-summary');
@@ -227,12 +246,12 @@ function renderLibrarySummary(): void {
   }
   el.classList.remove('muted');
   const running = state.library.filter((s) => s.bpm >= 145 || (s.bpm >= 72 && s.bpm <= 100)).length;
-  const doubtful = state.library.filter((s) => s.confidence !== undefined && s.confidence < LOW_CONFIDENCE).length;
+  const doubtful = state.library.filter(isDoubtful).length;
   const total = state.library.reduce((a, s) => a + s.duration, 0);
   el.innerHTML =
     `<strong>${n} morceau${n > 1 ? 'x' : ''}</strong> · ${formatDuration(total)} de musique<br>` +
     `${running} au tempo de course (≥ 145 ou 72–100 BPM)` +
-    (doubtful ? ` · <span class="warn-text">${doubtful} à vérifier</span>` : '');
+    (doubtful ? ` · <span class="warn-text">${doubtful} à vérifier${hideDoubtful() ? ', masqués' : ''}</span>` : '');
 }
 
 function libraryChanged(): void {
@@ -603,15 +622,23 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   const errors = [...extraErrors];
   if (!pace) errors.push('Allure invalide : utilisez le format min:s, par exemple 5:30.');
   const svc = service();
-  // On écarte les morceaux sans pulsation détectée ; pour Spotify, ceux qu'il ne propose pas ;
-  // pour Navidrome, ceux qui ne sont pas sur le serveur.
+  // On écarte les morceaux sans pulsation détectée, les douteux si l'option est active ; pour Spotify,
+  // ceux qu'il ne propose pas ; pour Navidrome, ceux qui ne sont pas sur le serveur.
   const notFound = svc === 'spotify' ? spotify.notFound() : new Set<string>();
   let library = state.library.filter(
     (s) =>
       !notFound.has(s.id) &&
       !(s.confidence !== undefined && s.confidence < NO_PULSE) &&
+      !(hideDoubtful() && isDoubtful(s)) &&
       (svc !== 'navidrome' || (navidrome.connected && !!s.navidromeId)),
   );
+  const doubtfulHidden = hideDoubtful() ? state.library.filter(isDoubtful).length : 0;
+  if (library.length === 0 && doubtfulHidden > 0) {
+    extraWarnings = [
+      ...extraWarnings,
+      `Les ${doubtfulHidden} morceaux douteux sont masqués : corrigez leur BPM (filtre « À vérifier seulement » de la Bibliothèque) ou décochez « Masquer les morceaux douteux ».`,
+    ];
+  }
   // Morceaux cochés seulement (ignoré tant qu'aucun morceau utilisable n'est coché).
   const onlySelected = $<HTMLInputElement>('only-selected').checked;
   const picked = library.filter((s) => selection.has(s));
@@ -686,7 +713,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
       const rate = e.playbackRate === 1 ? '—' : `${e.playbackRate > 1 ? '+' : ''}${((e.playbackRate - 1) * 100).toFixed(1)} %`;
       const tags = [
         svc === 'spotify' && e.song.spotifyUri ? '<span class="tag spotify" title="Trouvé sur Spotify">Spotify</span>' : '',
-        e.song.confidence !== undefined && e.song.confidence < LOW_CONFIDENCE ? '<span class="tag warn" title="BPM détecté avec une confiance faible">à vérifier</span>' : '',
+        isDoubtful(e.song) ? '<span class="tag warn" title="BPM détecté avec une confiance faible">à vérifier</span>' : '',
         e.repeated ? '<span class="tag">bis</span>' : '',
       ].join(' ');
       return `<tr class="${ok ? '' : 'off'}" data-i="${i}">
