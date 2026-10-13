@@ -111,8 +111,11 @@ puisse remplacer le précédent ; pour une clé privée, fournissez `RUNBPM_KEYS
   (orchestre, rubato) restent approximatives.
   Entre un tempo et son double, on retient le plus proche de 140 BPM (176 plutôt que 88) ; les deux
   conviennent de toute façon (un pas par temps ou par demi-temps).
-- **Confiance** de la mesure : les morceaux sans pulsation nette sont signalés « à vérifier » ; sans
-  pulsation du tout, ils sont écartés des playlists tant que leur BPM n’est pas corrigé.
+- **Confiance** de la mesure : sous 50 %, le morceau est **douteux**. Avec l’option « Masquer les
+  morceaux douteux » (activée par défaut, dans les options de sélection), il disparaît de la
+  Bibliothèque et des playlists ; le filtre « À vérifier seulement » permet de le retrouver. Un BPM
+  corrigé (saisie, ×2, ÷2) n’est plus douteux et le morceau réapparaît partout, sur tous les appareils
+  via la base partagée. Sans pulsation du tout (sous 5 %), il est écarté même option désactivée.
 - Les MP3 volumineux ne sont décodés que sur une tranche centrale : quelques centaines de ms par fichier.
 - Les fichiers déjà analysés (même chemin, taille, date) sont ignorés lors d’une nouvelle analyse.
 - Le tableau **Bibliothèque** permet de rechercher, filtrer les morceaux à vérifier, corriger un BPM

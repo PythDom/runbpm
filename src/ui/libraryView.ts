@@ -5,12 +5,18 @@ import type { Selection } from './selection';
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const MAX_ROWS = 200;
 /**
- * En dessous de cette confiance, le BPM détecté mérite une vérification. Seuils ajustés sur de la
- * vraie musique (confiances typiques de 20 à 80 %), bien plus basses que sur des sons de synthèse.
+ * En dessous de cette confiance, le BPM détecté est douteux : à vérifier, et masqué par défaut
+ * (bibliothèque et playlists). Sur de la vraie musique, les confiances vont de 20 à 80 % environ.
  */
-export const LOW_CONFIDENCE = 0.25;
+export const LOW_CONFIDENCE = 0.5;
 /** En dessous, aucune pulsation nette : le morceau est écarté des playlists tant qu'il n'est pas corrigé. */
 export const NO_PULSE = 0.05;
+
+/**
+ * BPM douteux : mesuré avec une pulsation peu nette. Un BPM corrigé à la main, lu dans les tags ou
+ * importé n'a pas de confiance : il n'est jamais douteux.
+ */
+export const isDoubtful = (s: Song): boolean => s.confidence !== undefined && s.confidence < LOW_CONFIDENCE;
 
 const SOURCE_LABEL: Record<NonNullable<Song['bpmSource']>, string> = {
   tag: 'tag',
@@ -44,6 +50,8 @@ export class LibraryView {
     private readonly getLibrary: () => Song[],
     private readonly selection: Selection,
     private readonly onEdit: (edit: LibraryEdit) => void,
+    /** Option « Masquer les morceaux douteux » (sauf avec le filtre « À vérifier seulement »). */
+    private readonly hideDoubtful: () => boolean = () => false,
   ) {
     root.addEventListener('input', (ev) => {
       const el = ev.target as HTMLInputElement;
@@ -100,9 +108,10 @@ export class LibraryView {
     const lib = this.getLibrary();
     this.root.hidden = lib.length === 0;
     if (lib.length === 0) return;
-    const doubtful = lib.filter((s) => s.confidence !== undefined && s.confidence < LOW_CONFIDENCE).length;
+    const doubtful = lib.filter(isDoubtful).length;
+    const hidden = doubtful && this.hideDoubtful() ? ' (masqués)' : '';
     this.root.innerHTML = `
-      <summary><h2 class="inline">Bibliothèque</h2> <span class="muted small">${lib.length} morceau(x)${doubtful ? ` · ${doubtful} à vérifier` : ''}
+      <summary><h2 class="inline">Bibliothèque</h2> <span class="muted small">${lib.length} morceau(x)${doubtful ? ` · ${doubtful} à vérifier${hidden}` : ''}
         · <span id="lib-sel-count"></span></span></summary>
       <p id="lib-note" class="muted small">${esc(this.note)}</p>
       <div class="lib-tools">
@@ -129,7 +138,7 @@ export class LibraryView {
     const q = normalizeName(this.query);
     return this.getLibrary()
       .filter((s) => !q || normalizeName(`${s.artist} ${s.title}`).includes(q))
-      .filter((s) => !this.onlyDoubtful || (s.confidence !== undefined && s.confidence < LOW_CONFIDENCE))
+      .filter((s) => (this.onlyDoubtful ? isDoubtful(s) : !(this.hideDoubtful() && isDoubtful(s))))
       .filter((s) => !this.onlySelected || this.selection.has(s))
       .sort((a, b) => a.artist.localeCompare(b.artist, 'fr') || a.title.localeCompare(b.title, 'fr'));
   }
@@ -157,7 +166,7 @@ export class LibraryView {
     tbody.innerHTML = rows
       .slice(0, MAX_ROWS)
       .map((s) => {
-        const doubtful = s.confidence !== undefined && s.confidence < LOW_CONFIDENCE;
+        const doubtful = isDoubtful(s);
         const excluded = s.confidence !== undefined && s.confidence < NO_PULSE;
         const source = s.bpmSource ? SOURCE_LABEL[s.bpmSource] : '';
         const conf = s.bpmSource === 'analyse' && s.confidence !== undefined ? ` ${Math.round(s.confidence * 100)} %` : '';
@@ -166,7 +175,7 @@ export class LibraryView {
           <td><div class="song-title">${esc(s.title)}</div><div class="muted small">${esc(s.artist)}</div></td>
           <td class="num">${formatDuration(s.duration)}</td>
           <td class="num"><input class="bpm-edit" type="text" inputmode="decimal" data-id="${esc(s.id)}" value="${s.bpm}" aria-label="BPM de ${esc(s.title)}" /></td>
-          <td><span class="tag ${doubtful ? 'warn' : ''}" title="${excluded ? 'Pas de pulsation nette : écarté des playlists tant que le BPM n’est pas corrigé' : doubtful ? 'Pulsation peu nette : à vérifier' : ''}">${source}${conf}${excluded ? ' · écarté' : ''}</span></td>
+          <td><span class="tag ${doubtful ? 'warn' : ''}" title="${excluded ? 'Pas de pulsation nette : écarté des playlists tant que le BPM n’est pas corrigé' : doubtful ? 'Pulsation peu nette : à vérifier. Masqué et écarté des playlists tant que le BPM n’est pas corrigé, si l’option est active' : ''}">${source}${conf}${excluded ? ' · écarté' : ''}</span></td>
           <td class="actions">
             <button type="button" data-act="half" data-id="${esc(s.id)}" title="Diviser le BPM par 2">÷2</button>
             <button type="button" data-act="x2" data-id="${esc(s.id)}" title="Multiplier le BPM par 2">×2</button>
