@@ -9,12 +9,13 @@ import { elevationStats, smoothedProfile, splitSections } from '../core/sections
 import { analyzeFiles, fileKey } from './analyzer';
 import { renderChart } from './chart';
 import { RunCompanion, type CompanionSnapshot } from './companion';
-import { isDoubtful, LibraryView, NO_PULSE } from './libraryView';
+import { DEFAULT_DOUBT_THRESHOLD, getDoubtThreshold, isDoubtful, LibraryView, NO_PULSE, setDoubtThreshold } from './libraryView';
 import { importNavidrome } from './navidromeImport';
 import { NavidromePanel } from './navidromePanel';
 import { Selection } from './selection';
 import { SharedPanel } from './sharedPanel';
 import { setRunActive } from './native';
+import { Pager } from './pager';
 import { mergeShared, toShared, type SharedDb, type SharedSong } from '../services/sharedDb';
 import { RunPlayer, type PlayerSnapshot, type PlayerTrack } from './player';
 import { confirmClick } from './confirm';
@@ -215,6 +216,40 @@ try {
 } catch {
   /* préférence indisponible */
 }
+// Seuil de confiance des morceaux douteux, réglable en direct (préférence de l'appareil).
+const DOUBT_THRESHOLD_KEY = 'runbpm.doubtThreshold';
+const thresholdInput = $<HTMLInputElement>('doubt-threshold');
+function showThreshold(): void {
+  const pct = Math.round(getDoubtThreshold() * 100);
+  thresholdInput.value = String(pct);
+  const n = state.library.filter(isDoubtful).length;
+  $('doubt-threshold-val').innerHTML = `<strong>${pct} %</strong> · ${n} morceau${n > 1 ? 'x' : ''}`;
+}
+try {
+  const saved = Number.parseFloat(localStorage.getItem(DOUBT_THRESHOLD_KEY) ?? '');
+  setDoubtThreshold(Number.isFinite(saved) ? saved : DEFAULT_DOUBT_THRESHOLD);
+} catch {
+  /* préférence indisponible */
+}
+let thresholdFrame = 0;
+thresholdInput.addEventListener('input', () => {
+  setDoubtThreshold(Number(thresholdInput.value) / 100);
+  showThreshold();
+  cancelAnimationFrame(thresholdFrame);
+  thresholdFrame = requestAnimationFrame(() => {
+    renderLibrarySummary();
+    libraryView.render();
+    update();
+  });
+});
+thresholdInput.addEventListener('change', () => {
+  try {
+    localStorage.setItem(DOUBT_THRESHOLD_KEY, String(getDoubtThreshold()));
+  } catch {
+    /* préférence non enregistrée */
+  }
+});
+
 $('hide-doubtful').addEventListener('change', () => {
   try {
     localStorage.setItem(HIDE_DOUBTFUL_KEY, hideDoubtful() ? '1' : '0');
@@ -237,6 +272,7 @@ const libraryView = new LibraryView($('library-view'), () => state.library, sele
 }, hideDoubtful);
 
 function renderLibrarySummary(): void {
+  showThreshold();
   const el = $('library-summary');
   const n = state.library.length;
   if (n === 0) {
@@ -611,7 +647,29 @@ $('reroll').addEventListener('click', () => {
   update();
 });
 
+const pager = new Pager($('pager'), $('tabbar'), $('screen-title'));
+
+/** Coche les onglets des étapes faites (après chaque recalcul). */
+function refreshSteps(): void {
+  const svc = service();
+  pager.setDone(0, !!state.route);
+  pager.setDone(1, !!parsePace(paceInput.value));
+  pager.setDone(2, state.library.length > 0);
+  pager.setDone(3, svc === 'navidrome' ? navidrome.connected : svc === 'spotify' ? spotify.connected : true);
+  pager.setDone(4, !!state.current);
+  pager.setDone(5, !!state.current);
+}
+
+/** Playlist prête ou non : résultats et lecteur, ou écrans d'attente. */
+function showResults(ready: boolean): void {
+  $('results').hidden = !ready;
+  $('run-card').hidden = !ready;
+  $('playlist-empty').hidden = ready;
+  $('run-empty').hidden = ready;
+}
+
 function update(extraErrors: string[] = [], extraWarnings: string[] = []): void {
+  queueMicrotask(refreshSteps);
   stopOtherMode();
   const pace = parsePace(paceInput.value);
   const baseCadenceInput = $<HTMLInputElement>('base-cadence');
@@ -657,7 +715,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   }
 
   if (!state.route || library.length === 0 || !pace) {
-    $('results').hidden = true;
+    showResults(false);
     lastExport = undefined;
     state.current = undefined;
     loadCompanion(undefined);
@@ -689,7 +747,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   });
 
   showMessages(errors, [...extraWarnings, ...playlist.warnings]);
-  $('results').hidden = false;
+  showResults(true);
   state.current = { plan, playlist };
 
   const cadences = plan.sections.map((s) => s.cadence);

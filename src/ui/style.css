@@ -114,12 +114,6 @@ h2.inline {
   color: var(--muted);
 }
 
-.inputs {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 16px;
-  margin: 20px 0;
-}
 
 .card {
   background: var(--surface);
@@ -509,9 +503,6 @@ footer {
 
 @media (max-width: 560px) {
   .grid2 {
-    grid-template-columns: 1fr;
-  }
-  .inputs {
     grid-template-columns: 1fr;
   }
 }
@@ -968,4 +959,370 @@ button[data-armed='1'] {
 .shared-panel summary {
   cursor: pointer;
   font-size: 0.92em;
+}
+
+.lib-pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  margin: 10px 0;
+}
+
+.lib-pages button {
+  min-width: 38px;
+  padding: 6px 10px;
+}
+
+label.threshold input {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+label.threshold span {
+  white-space: nowrap;
+}
+
+/* ---------- Écrans (une étape par écran sur téléphone) ---------- */
+
+.logo {
+  width: 1.15em;
+  height: 1.15em;
+  margin-right: 10px;
+  border-radius: 28%;
+  vertical-align: -0.15em;
+}
+
+.screen-title {
+  display: none;
+}
+
+.next {
+  display: block;
+  width: 100%;
+  margin: 16px 0 8px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.card.empty {
+  padding: 36px 20px;
+  text-align: center;
+}
+
+.card.empty h2 {
+  font-size: 1.2rem;
+}
+
+.card.empty button {
+  margin-top: 8px;
+  padding: 12px 24px;
+  border-radius: 12px;
+}
+
+.tabbar {
+  display: none;
+}
+
+/* Grand écran : toutes les étapes ensemble, comme sur un tableau de bord. */
+@media (min-width: 900px) {
+  .pager {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    margin: 20px auto;
+    align-items: start;
+  }
+  #screen-music {
+    display: contents;
+  }
+  #screen-route { order: 1; }
+  #screen-runner { order: 2; }
+  #screen-music > .card:not(.library-view) { order: 3; }
+  #screen-listen { order: 4; }
+  #library-view { order: 5; }
+  #screen-run { order: 6; }
+  #screen-playlist { order: 7; }
+  #library-view,
+  #screen-run,
+  #screen-playlist {
+    grid-column: 1 / -1;
+  }
+  .next,
+  .card.empty {
+    display: none;
+  }
+}
+
+/* Téléphone : application à écrans, on glisse de l'un à l'autre. */
+@media (max-width: 899px) {
+  html,
+  body {
+    height: 100%;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    overflow: hidden;
+  }
+  .top {
+    flex: none;
+    width: 100%;
+    max-width: none;
+    padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+    background: linear-gradient(120deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--cad)));
+    color: #fff;
+  }
+  .top h1 {
+    font-size: 1.15rem;
+    display: flex;
+    align-items: center;
+  }
+  .top .logo {
+    box-shadow: 0 0 0 2px rgb(255 255 255 / 0.6);
+  }
+  .tagline,
+  footer {
+    display: none;
+  }
+  .screen-title {
+    display: inline;
+    margin-left: auto;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 0.2);
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  .pager {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .pager::-webkit-scrollbar {
+    display: none;
+  }
+  .pager,
+  .screen {
+    position: relative;
+  }
+  .screen {
+    flex: 0 0 100%;
+    min-width: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+    padding: 14px 12px 28px;
+  }
+  .screen > .card,
+  .screen .results > .card,
+  .screen .results > details.card {
+    margin: 0 0 12px;
+    border: 0;
+    border-radius: 18px;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 4px 16px rgb(0 0 0 / 0.05);
+  }
+  .table-wrap {
+    overscroll-behavior-x: contain;
+  }
+  input[type='text'],
+  input[type='number'],
+  select {
+    padding: 11px 12px;
+    border-radius: 10px;
+    font-size: 1rem;
+  }
+  button {
+    padding: 9px 14px;
+    border-radius: 10px;
+  }
+  .card h2 .step {
+    width: 26px;
+    height: 26px;
+  }
+
+  .tabbar {
+    flex: none;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .tabbar button {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 0 4px;
+    border: 0;
+    border-radius: 12px;
+    background: none;
+    color: var(--muted);
+    font-size: 0.66rem;
+  }
+  .tabbar svg {
+    width: 22px;
+    height: 22px;
+    fill: currentColor;
+  }
+  .tabbar button[aria-current] {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    font-weight: 600;
+  }
+  /* Point : étape à faire ; coche : étape faite. */
+  .tabbar button.todo::after,
+  .tabbar button.done::after {
+    position: absolute;
+    top: 3px;
+    left: calc(50% + 8px);
+    display: grid;
+    place-items: center;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    font-size: 9px;
+    line-height: 1;
+  }
+  .tabbar button.todo::after {
+    content: '';
+    width: 8px;
+    height: 8px;
+    background: var(--warn);
+  }
+  .tabbar button.done::after {
+    content: '✓';
+    background: var(--ok);
+    color: #fff;
+  }
+
+  /* Écran Courir : gros boutons, cadence bien lisible. */
+  #screen-run .run-main {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+  #screen-run .now-info {
+    grid-row: auto;
+    width: 100%;
+  }
+  #screen-run .now-cad {
+    width: 100%;
+    padding: 16px;
+  }
+  #screen-run .now-cad .value {
+    font-size: 3.4rem;
+    line-height: 1.1;
+  }
+  #screen-run .controls {
+    gap: 20px;
+  }
+  #screen-run button.icon {
+    width: 56px;
+    height: 56px;
+  }
+  #screen-run button.icon.primary {
+    width: 80px;
+    height: 80px;
+    box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  #screen-run button.icon.primary svg {
+    width: 32px;
+    height: 32px;
+  }
+  #screen-run .player-options {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 899px) {
+  #screen-run .now-cad { order: 1; }
+  #screen-run .now-info { order: 2; }
+  #screen-run .controls { order: 3; }
+}
+.stats {
+  margin-bottom: 12px;
+}
+
+@media (max-width: 899px) {
+  input.bpm-edit {
+    width: 58px;
+    padding: 6px;
+    border-radius: 8px;
+    font-size: 0.95rem;
+  }
+  /* Téléphone : la durée cède sa place aux corrections du BPM. */
+  .lib-table th:nth-child(3),
+  .lib-table td:nth-child(3) {
+    display: none;
+  }
+  .lib-table td.actions button:not(.link) {
+    padding: 6px 9px;
+  }
+}
+
+/* Bibliothèque : le titre (2e colonne) s'étire et passe à la ligne ; le BPM reste compact. */
+.lib-table td:nth-child(2) {
+  white-space: normal;
+  min-width: 120px;
+}
+
+.lib-table td:nth-child(4) {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+@media (max-width: 899px) {
+  .lib-table td:nth-child(2) {
+    min-width: 0;
+    width: 100%;
+  }
+  .lib-table td.actions button.link {
+    margin-left: 2px;
+  }
+}
+
+.src-inline,
+.del-icon {
+  display: none;
+}
+
+@media (max-width: 899px) {
+  .lib-table .src-col,
+  .del-label {
+    display: none;
+  }
+  .src-inline,
+  .del-icon {
+    display: inline;
+  }
+  .lib-table td.actions button.link {
+    padding: 6px 8px;
+    font-size: 1rem;
+    text-decoration: none;
+  }
+}
+
+.tag {
+  white-space: nowrap;
 }
