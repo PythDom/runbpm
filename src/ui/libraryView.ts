@@ -3,12 +3,23 @@ import { normalizeName } from '../core/names';
 import type { Selection } from './selection';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const MAX_ROWS = 200;
+/** Morceaux par page du tableau. */
+const PAGE_SIZE = 50;
 /**
- * En dessous de cette confiance, le BPM détecté est douteux : à vérifier, et masqué par défaut
- * (bibliothèque et playlists). Sur de la vraie musique, les confiances vont de 20 à 80 % environ.
+ * En dessous de ce seuil de confiance (réglable dans les options), le BPM détecté est douteux : à
+ * vérifier, et masqué par défaut (bibliothèque et playlists). Sur de la vraie musique, les confiances
+ * vont de 20 à 80 % environ.
  */
-export const LOW_CONFIDENCE = 0.5;
+export const DEFAULT_DOUBT_THRESHOLD = 0.8;
+let doubtThreshold = DEFAULT_DOUBT_THRESHOLD;
+
+export function setDoubtThreshold(value: number): void {
+  doubtThreshold = Math.min(1, Math.max(0, value));
+}
+
+export function getDoubtThreshold(): number {
+  return doubtThreshold;
+}
 /** En dessous, aucune pulsation nette : le morceau est écarté des playlists tant qu'il n'est pas corrigé. */
 export const NO_PULSE = 0.05;
 
@@ -16,7 +27,7 @@ export const NO_PULSE = 0.05;
  * BPM douteux : mesuré avec une pulsation peu nette. Un BPM corrigé à la main, lu dans les tags ou
  * importé n'a pas de confiance : il n'est jamais douteux.
  */
-export const isDoubtful = (s: Song): boolean => s.confidence !== undefined && s.confidence < LOW_CONFIDENCE;
+export const isDoubtful = (s: Song): boolean => s.confidence !== undefined && s.confidence < doubtThreshold;
 
 const SOURCE_LABEL: Record<NonNullable<Song['bpmSource']>, string> = {
   tag: 'tag',
@@ -42,6 +53,8 @@ export class LibraryView {
   private query = '';
   private onlyDoubtful = false;
   private onlySelected = false;
+  /** Page affichée (à partir de 0). */
+  private page = 0;
   /** Note sous le titre (ex. état de la base partagée). */
   private note = '';
 
@@ -55,16 +68,12 @@ export class LibraryView {
   ) {
     root.addEventListener('input', (ev) => {
       const el = ev.target as HTMLInputElement;
-      if (el.id === 'lib-search') {
-        this.query = el.value;
-        this.renderRows();
-      } else if (el.id === 'lib-doubtful') {
-        this.onlyDoubtful = el.checked;
-        this.renderRows();
-      } else if (el.id === 'lib-selected') {
-        this.onlySelected = el.checked;
-        this.renderRows();
-      }
+      if (el.id === 'lib-search') this.query = el.value;
+      else if (el.id === 'lib-doubtful') this.onlyDoubtful = el.checked;
+      else if (el.id === 'lib-selected') this.onlySelected = el.checked;
+      else return;
+      this.page = 0;
+      this.renderRows();
     });
     root.addEventListener('change', (ev) => {
       const el = ev.target as HTMLInputElement;
@@ -84,6 +93,15 @@ export class LibraryView {
       else if (song) el.value = String(song.bpm);
     });
     root.addEventListener('click', (ev) => {
+      const nav = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-page]');
+      if (nav) {
+        const last = Math.max(0, Math.ceil(this.visible().length / PAGE_SIZE) - 1);
+        const to = { first: 0, prev: this.page - 1, next: this.page + 1, last }[nav.dataset.page ?? ''] ?? this.page;
+        this.page = Math.min(last, Math.max(0, to));
+        this.renderRows();
+        if (nav.closest('#lib-pages-bottom')) this.root.querySelector('.lib-table')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        return;
+      }
       const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-act]');
       const song = this.find(btn?.dataset.id);
       if (!btn || !song) return;
@@ -123,13 +141,14 @@ export class LibraryView {
         dans les options de sélection.</p>
       <p class="muted small">Le BPM détecté peut être le double ou la moitié du tempo perçu : les deux conviennent pour courir
         (un pas par temps ou par demi-temps). Corrigez surtout les valeurs franchement fausses.</p>
+      <div id="lib-pages-top" class="lib-pages"></div>
       <div class="table-wrap">
         <table class="lib-table">
-          <thead><tr><th class="sel-col"><input type="checkbox" id="lib-sel-all" title="Cocher ou décocher les morceaux affichés" aria-label="Cocher les morceaux affichés" /></th><th>Morceau</th><th class="num">Durée</th><th class="num">BPM</th><th>Source</th><th></th></tr></thead>
+          <thead><tr><th class="sel-col"><input type="checkbox" id="lib-sel-all" title="Cocher ou décocher les morceaux affichés" aria-label="Cocher les morceaux affichés" /></th><th>Morceau</th><th class="num">Durée</th><th class="num">BPM</th><th class="src-col">Source</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
-      <p id="lib-more" class="muted small"></p>`;
+      <div id="lib-pages-bottom" class="lib-pages"></div>`;
     this.renderRows();
   }
 
@@ -161,31 +180,45 @@ export class LibraryView {
       const n = rows.filter((s) => this.selection.has(s)).length;
       all.checked = rows.length > 0 && n === rows.length;
       all.indeterminate = n > 0 && n < rows.length;
-      all.title = `${all.checked ? 'Décocher' : 'Cocher'} les ${rows.length} morceau(x) affiché(s)`;
+      all.title = `${all.checked ? 'Décocher' : 'Cocher'} les ${rows.length} morceau(x) de la liste filtrée (toutes pages)`;
+    }
+    const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+    this.page = Math.min(this.page, pages - 1);
+    const start = this.page * PAGE_SIZE;
+    const nav =
+      pages > 1
+        ? `<button type="button" data-page="first" ${this.page === 0 ? 'disabled' : ''} aria-label="Première page">«</button>
+           <button type="button" data-page="prev" ${this.page === 0 ? 'disabled' : ''} aria-label="Page précédente">‹</button>
+           <span class="small muted">Page ${this.page + 1} / ${pages} · ${start + 1}–${Math.min(rows.length, start + PAGE_SIZE)} sur ${rows.length}</span>
+           <button type="button" data-page="next" ${this.page === pages - 1 ? 'disabled' : ''} aria-label="Page suivante">›</button>
+           <button type="button" data-page="last" ${this.page === pages - 1 ? 'disabled' : ''} aria-label="Dernière page">»</button>`
+        : `<span class="small muted">${rows.length} morceau(x)</span>`;
+    for (const id of ['lib-pages-top', 'lib-pages-bottom']) {
+      const el = this.root.querySelector(`#${id}`);
+      if (el) el.innerHTML = id === 'lib-pages-bottom' && pages === 1 ? '' : nav;
     }
     tbody.innerHTML = rows
-      .slice(0, MAX_ROWS)
+      .slice(start, start + PAGE_SIZE)
       .map((s) => {
         const doubtful = isDoubtful(s);
         const excluded = s.confidence !== undefined && s.confidence < NO_PULSE;
         const source = s.bpmSource ? SOURCE_LABEL[s.bpmSource] : '';
         const conf = s.bpmSource === 'analyse' && s.confidence !== undefined ? ` ${Math.round(s.confidence * 100)} %` : '';
+        const tag = `<span class="tag ${doubtful ? 'warn' : ''}" title="${excluded ? 'Pas de pulsation nette : écarté des playlists tant que le BPM n’est pas corrigé' : doubtful ? 'Pulsation peu nette : à vérifier. Masqué et écarté des playlists tant que le BPM n’est pas corrigé, si l’option est active' : ''}">${source}${conf}${excluded ? ' · écarté' : ''}</span>`;
         return `<tr class="${doubtful ? 'doubtful' : ''}">
           <td class="sel-col"><input type="checkbox" class="sel" data-id="${esc(s.id)}" ${this.selection.has(s) ? 'checked' : ''} aria-label="Courir avec ${esc(s.title)}" /></td>
-          <td><div class="song-title">${esc(s.title)}</div><div class="muted small">${esc(s.artist)}</div></td>
+          <td><div class="song-title">${esc(s.title)}</div><div class="muted small">${esc(s.artist)} <span class="src-inline">${tag}</span></div></td>
           <td class="num">${formatDuration(s.duration)}</td>
           <td class="num"><input class="bpm-edit" type="text" inputmode="decimal" data-id="${esc(s.id)}" value="${s.bpm}" aria-label="BPM de ${esc(s.title)}" /></td>
-          <td><span class="tag ${doubtful ? 'warn' : ''}" title="${excluded ? 'Pas de pulsation nette : écarté des playlists tant que le BPM n’est pas corrigé' : doubtful ? 'Pulsation peu nette : à vérifier. Masqué et écarté des playlists tant que le BPM n’est pas corrigé, si l’option est active' : ''}">${source}${conf}${excluded ? ' · écarté' : ''}</span></td>
+          <td class="src-col">${tag}</td>
           <td class="actions">
             <button type="button" data-act="half" data-id="${esc(s.id)}" title="Diviser le BPM par 2">÷2</button>
             <button type="button" data-act="x2" data-id="${esc(s.id)}" title="Multiplier le BPM par 2">×2</button>
-            <button type="button" data-act="del" data-id="${esc(s.id)}" class="link danger" title="Retirer de la bibliothèque">Retirer</button>
+            <button type="button" data-act="del" data-id="${esc(s.id)}" class="link danger" title="Retirer de la bibliothèque" aria-label="Retirer ${esc(s.title)} de la bibliothèque"><span class="del-label">Retirer</span><span class="del-icon" aria-hidden="true">✕</span></button>
           </td>
         </tr>`;
       })
       .join('');
-    const more = this.root.querySelector('#lib-more');
-    if (more) more.textContent = rows.length > MAX_ROWS ? `${rows.length - MAX_ROWS} autres morceaux : affinez la recherche.` : '';
   }
 
   private find(id: string | undefined): Song | undefined {

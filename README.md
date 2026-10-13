@@ -88,6 +88,11 @@ L’APK est construit par GitHub Actions (`.github/workflows/android.yml`) à ch
 3. Dans l’application : Navidrome (adresse **joignable hors de chez vous** pour courir dehors), puis le
    code d’accès de la base partagée. La bibliothèque arrive de la base, sans rien mesurer.
 
+Sur téléphone, l’application présente **un écran par étape** (Parcours, Allure, Musique, Écoute,
+Playlist, Courir) : on glisse de l’un à l’autre ou on touche un onglet ; un point orange signale une
+étape à compléter, une coche une étape faite. Sur grand écran, toutes les étapes restent visibles
+ensemble. L’icône (`resources/icon.svg`) sert aussi d’icône Android et d’écran de démarrage.
+
 Pendant la lecture, une notification « RunBPM : course en cours » maintient l’application active écran
 verrouillé (service Android « lecture multimédia ») ; l’option « Garder l’écran allumé » est appliquée
 par l’application. Restent réservés à la version web sur PC : la connexion Spotify (retour de
@@ -111,15 +116,16 @@ puisse remplacer le précédent ; pour une clé privée, fournissez `RUNBPM_KEYS
   (orchestre, rubato) restent approximatives.
   Entre un tempo et son double, on retient le plus proche de 140 BPM (176 plutôt que 88) ; les deux
   conviennent de toute façon (un pas par temps ou par demi-temps).
-- **Confiance** de la mesure : sous 50 %, le morceau est **douteux**. Avec l’option « Masquer les
-  morceaux douteux » (activée par défaut, dans les options de sélection), il disparaît de la
+- **Confiance** de la mesure : sous un seuil (80 % par défaut, **réglable en direct** avec le curseur
+  « Douteux sous » des options de sélection, mémorisé par appareil), le morceau est **douteux**. Avec
+  l’option « Masquer les morceaux douteux » (activée par défaut), il disparaît de la
   Bibliothèque et des playlists ; le filtre « À vérifier seulement » permet de le retrouver. Un BPM
   corrigé (saisie, ×2, ÷2) n’est plus douteux et le morceau réapparaît partout, sur tous les appareils
   via la base partagée. Sans pulsation du tout (sous 5 %), il est écarté même option désactivée.
 - Les MP3 volumineux ne sont décodés que sur une tranche centrale : quelques centaines de ms par fichier.
 - Les fichiers déjà analysés (même chemin, taille, date) sont ignorés lors d’une nouvelle analyse.
-- Le tableau **Bibliothèque** permet de rechercher, filtrer les morceaux à vérifier, corriger un BPM
-  (saisie, ×2, ÷2) ou retirer un morceau.
+- Le tableau **Bibliothèque** (50 morceaux par page, toute la bibliothèque accessible) permet de
+  rechercher, filtrer les morceaux à vérifier, corriger un BPM (saisie, ×2, ÷2) ou retirer un morceau.
 
 L’import CSV/JSON reste possible (voir *Formats d’entrée*).
 
@@ -325,6 +331,7 @@ src/ui/            interface (TypeScript sans framework)
   selection.ts       sélection « course » (appareil + serveur)
   sharedPanel.ts     réglage de la base partagée (adresse, code d’accès)
   native.ts          pont vers l’application Android (service de course, écran allumé)
+  pager.ts           écrans par étape sur téléphone (glissement, onglets)
   companion.ts       compagnon de course (chronomètre / synchro Spotify, Wake Lock)
   metronome.ts       métronome Web Audio
   spotifyPanel.ts    connexion Spotify
