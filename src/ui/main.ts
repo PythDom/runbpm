@@ -14,7 +14,7 @@ import { importNavidrome } from './navidromeImport';
 import { NavidromePanel } from './navidromePanel';
 import { Selection } from './selection';
 import { SharedPanel } from './sharedPanel';
-import { setRunActive } from './native';
+import { relaxFileInputs, setRunActive } from './native';
 import { Pager } from './pager';
 import { mergeShared, toShared, type SharedDb, type SharedSong } from '../services/sharedDb';
 import { RunPlayer, type PlayerSnapshot, type PlayerTrack } from './player';
@@ -1050,6 +1050,7 @@ try {
 } catch {
   /* préférence indisponible */
 }
+relaxFileInputs();
 renderService();
 renderLibrarySummary();
 libraryView.render();
