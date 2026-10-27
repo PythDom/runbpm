@@ -31,3 +31,24 @@ export function setRunActive(on: boolean, text = '', keepScreenOn = true): void 
     RunSession.stop().catch(() => undefined);
   }
 }
+
+/**
+ * Filtre « accept » d'un champ fichier. Dans l'application Android, le sélecteur traduit les
+ * extensions en types MIME : celles qu'Android ne connaît pas (.gpx, .fit, .tcx…) disparaissent du
+ * filtre, et les fichiers correspondants deviennent impossibles à choisir. On n'y filtre donc pas :
+ * le format est reconnu au contenu après le choix.
+ */
+export function fileAccept(extensions: string): string {
+  return isNativeApp ? '' : extensions;
+}
+
+/** Retire les filtres d'extensions des champs fichiers déjà présents dans la page (application Android). */
+export function relaxFileInputs(root: ParentNode = document): void {
+  if (!isNativeApp) return;
+  for (const input of root.querySelectorAll<HTMLInputElement>('input[type="file"][accept]')) {
+    // Les filtres par type (audio/*) fonctionnent : on ne retire que les extensions.
+    const kept = input.accept.split(',').filter((t) => t.includes('/'));
+    if (kept.length) input.accept = kept.join(',');
+    else input.removeAttribute('accept');
+  }
+}

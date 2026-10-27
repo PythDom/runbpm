@@ -4,6 +4,7 @@ import type { PlanOptions } from '../core/pacing';
 import { DEFAULT_SLOPE_RULES, rangeLabel, withValues, type SlopeRule } from '../core/slopeRules';
 import { safeStorage } from '../services/spotify';
 import { confirmClick } from './confirm';
+import { fileAccept } from './native';
 
 /**
  * Profils coureur : chacun a ses réglages de cadence et, en option, un calibrage personnel issu
@@ -307,7 +308,7 @@ export class ProfilePanel {
     const p = this.current;
     const cal = p.calibration;
     const msg = this.message ? `<p class="small ${this.messageIsError ? 'error-text' : 'muted'}">${esc(this.message)}</p>` : '';
-    const fileInput = `<label class="file compact"><input type="file" id="calibration-files" accept=".fit,.tcx" multiple />
+    const fileInput = `<label class="file compact"><input type="file" id="calibration-files" accept="${fileAccept('.fit,.tcx')}" multiple />
       <span>${cal ? 'Ajouter des sorties' : 'Calibrer avec des sorties enregistrées'} (FIT, TCX)</span></label>`;
     if (!cal) {
       this.el.calibration.innerHTML = `
