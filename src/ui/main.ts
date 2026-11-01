@@ -16,6 +16,8 @@ import { Selection } from './selection';
 import { SharedPanel } from './sharedPanel';
 import { relaxFileInputs, setRunActive } from './native';
 import { Pager } from './pager';
+import { WorkoutPanel } from './workoutPanel';
+import { stepBoundaries, workoutPlan } from '../core/workout';
 import { mergeShared, toShared, type SharedDb, type SharedSong } from '../services/sharedDb';
 import { RunPlayer, type PlayerSnapshot, type PlayerTrack } from './player';
 import { confirmClick } from './confirm';
@@ -115,6 +117,7 @@ function slug(s: string): string {
 }
 
 function playlistName(): string {
+  if (workoutPanel.workout) return `RunBPM – ${workoutPanel.workout.title}`;
   const pace = parsePace($<HTMLInputElement>('pace').value);
   return `RunBPM – ${state.route?.name ?? 'course'}${pace ? ` – ${formatPace(pace)}/km` : ''}`;
 }
@@ -180,6 +183,35 @@ const profiles = new ProfilePanel(
     nameSave: $('profile-name-save'),
     nameCancel: $('profile-name-cancel'),
   },
+  () => update(),
+);
+
+/**
+ * Cadence (pas/min) à une vitesse donnée pour le coureur : profil calibré, sinon cadence au plat
+ * saisie (corrigée de la vitesse), sinon estimation.
+ */
+function cadenceForSpeed(kmh: number): number {
+  const calibrated = profiles.planOptions(kmh)?.baseCadence;
+  if (calibrated) return calibrated;
+  const pace = parsePace(paceInput.value);
+  const base = Number.parseFloat($<HTMLInputElement>('base-cadence').value);
+  if (pace && Number.isFinite(base)) return Math.round(base + 3 * (kmh - 3600 / pace));
+  return estimateCadence(kmh);
+}
+
+// ---------- Séance d'entraînement (alternative au parcours) ----------
+
+const workoutPanel = new WorkoutPanel(
+  {
+    modes: $('plan-mode'),
+    routePanel: $('route-panel'),
+    panel: $('workout-panel'),
+    text: $<HTMLTextAreaElement>('workout-text'),
+    steps: $('workout-steps'),
+    summary: $('workout-summary'),
+  },
+  cadenceForSpeed,
+  () => parsePace(paceInput.value) ?? 360,
   () => update(),
 );
 
@@ -652,7 +684,7 @@ const pager = new Pager($('pager'), $('tabbar'), $('screen-title'));
 /** Coche les onglets des étapes faites (après chaque recalcul). */
 function refreshSteps(): void {
   const svc = service();
-  pager.setDone(0, !!state.route);
+  pager.setDone(0, workoutPanel.mode === 'workout' ? !!workoutPanel.workout : !!state.route);
   pager.setDone(1, !!parsePace(paceInput.value));
   pager.setDone(2, state.library.length > 0);
   pager.setDone(3, svc === 'navidrome' ? navidrome.connected : svc === 'spotify' ? spotify.connected : true);
@@ -678,7 +710,11 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   profiles.showCalibratedCadence(pace ? 3600 / pace : undefined);
 
   const errors = [...extraErrors];
-  if (!pace) errors.push('Allure invalide : utilisez le format min:s, par exemple 5:30.');
+  const workout = workoutPanel.workout;
+  if (!pace && !workout) errors.push('Allure invalide : utilisez le format min:s, par exemple 5:30.');
+  workoutPanel.refresh();
+  $('workout-pace-hint').hidden = workoutPanel.mode !== 'workout';
+  $('legend-elev').hidden = !!workout;
   const svc = service();
   // On écarte les morceaux sans pulsation détectée, les douteux si l'option est active ; pour Spotify,
   // ceux qu'il ne propose pas ; pour Navidrome, ceux qui ne sont pas sur le serveur.
@@ -714,7 +750,8 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
     ];
   }
 
-  if (!state.route || library.length === 0 || !pace) {
+  const planReady = workoutPanel.mode === 'workout' ? !!workout : !!state.route && !!pace;
+  if (!planReady || library.length === 0) {
     showResults(false);
     lastExport = undefined;
     state.current = undefined;
@@ -727,15 +764,19 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   const route = state.route;
   const tolerance = numberInput('tolerance', 3) / 100;
   const baseCadence = Number.parseFloat(baseCadenceInput.value);
-  const sections = splitSections(route);
-  const plan = planRun(sections, {
-    targetPace: pace,
-    mode: $<HTMLSelectElement>('mode').value as PacingMode,
-    // X : cadence au plat (calibrage du profil, saisie manuelle ou estimation) ; la pente suit les
-    // règles par tranche du profil.
-    ...(profiles.planOptions(3600 / pace) ?? { baseCadence: Number.isFinite(baseCadence) ? baseCadence : undefined }),
-    slopeRules: profiles.slopeRules(),
-  });
+  // Séance : un bloc par section, cadence selon l'allure de chaque bloc. Parcours : sections de
+  // pente homogène, cadence au plat X ajustée par tranche de pente.
+  const sections = workout ? [] : splitSections(route!);
+  const plan = workout
+    ? workoutPlan(workout, cadenceForSpeed, pace ?? 360)
+    : planRun(sections, {
+        targetPace: pace!,
+        mode: $<HTMLSelectElement>('mode').value as PacingMode,
+        // X : cadence au plat (calibrage du profil, saisie manuelle ou estimation) ; la pente suit les
+        // règles par tranche du profil.
+        ...(profiles.planOptions(3600 / pace!) ?? { baseCadence: Number.isFinite(baseCadence) ? baseCadence : undefined }),
+        slopeRules: profiles.slopeRules(),
+      });
   // Les applications de streaming jouent au tempo original ; seul le lecteur interne (Navidrome)
   // peut ajuster la vitesse de lecture.
   const playlist = generatePlaylist(plan, library, {
@@ -744,6 +785,8 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
     allowHalfTime: $<HTMLInputElement>('half-time').checked,
     allowRepeat: $<HTMLInputElement>('repeat').checked,
     seed: state.seed,
+    // Séance fractionnée lue dans RunBPM : chaque bloc a sa musique (morceaux coupés aux changements).
+    cutAt: workout && svc === 'navidrome' ? stepBoundaries(plan) : undefined,
   });
 
   showMessages(errors, [...extraWarnings, ...playlist.warnings]);
@@ -753,9 +796,9 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   const cadences = plan.sections.map((s) => s.cadence);
   const { gain } = elevationStats(sections);
   $('stats').innerHTML = [
-    ['Distance', `${km(plan.totalDistance)} km`],
-    ['Dénivelé +', `${Math.round(gain)} m`],
-    ['Temps estimé', formatDuration(plan.totalTime)],
+    ['Distance', `${workout ? '≈ ' : ''}${km(plan.totalDistance)} km`],
+    workout ? ['Blocs', `${plan.sections.length}`] : ['Dénivelé +', `${Math.round(gain)} m`],
+    [workout ? 'Durée' : 'Temps estimé', formatDuration(plan.totalTime)],
     ['Cadence cible', Math.min(...cadences) === Math.max(...cadences) ? `${cadences[0]}` : `${Math.min(...cadences)}–${Math.max(...cadences)}`, 'pas/min'],
     ['Morceaux', `${playlist.entries.length}`],
     ['Dans la tolérance', `${Math.round(playlist.matchRatio * 100)} %`, 'du temps de course'],
@@ -763,7 +806,9 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
     .map(([label, value, unit]) => `<div class="stat"><span class="label">${label}</span><span class="value">${value}</span>${unit ? `<span class="unit">${unit}</span>` : ''}</div>`)
     .join('');
 
-  $('chart').innerHTML = renderChart(smoothedProfile(route), plan, playlist, tolerance);
+  $('chart').innerHTML = workout
+    ? renderChart([], plan, playlist, tolerance, true)
+    : renderChart(smoothedProfile(route!), plan, playlist, tolerance);
 
   $('playlist').querySelector('tbody')!.innerHTML = playlist.entries
     .map((e, i) => {
@@ -792,8 +837,8 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
       (s) => `<tr>
         <td>${km(s.startDist, 1)} → ${km(s.endDist, 1)}</td>
         <td class="num">${Math.round(s.length)} m</td>
-        <td class="num">${s.grade >= 0 ? '+' : ''}${(s.grade * 100).toFixed(1)} %</td>
-        <td title="${esc(ruleById(s.ruleId)?.tip ?? '')}">${esc(ruleById(s.ruleId)?.label ?? '')}</td>
+        <td class="num">${workout ? '—' : `${s.grade >= 0 ? '+' : ''}${(s.grade * 100).toFixed(1)} %`}</td>
+        <td title="${esc(ruleById(s.ruleId)?.tip ?? '')}">${esc(s.label ?? ruleById(s.ruleId)?.label ?? '')}</td>
         <td class="num">${formatPace(s.pace)} /km</td>
         <td class="num strong">${s.cadence}</td>
         <td class="num">${formatDuration(s.startTime)}</td>
@@ -812,7 +857,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
     lastExport = {
       m3u: toM3U(playlist, playlistName()),
       csv: toCsv(playlist),
-      json: toJson(plan, playlist, { route: route.name, targetPace: formatPace(pace) }),
+      json: toJson(plan, playlist, workout ? { workout: workout.title } : { route: route!.name, targetPace: formatPace(pace!) }),
     };
     return;
   }
@@ -828,7 +873,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   lastExport = {
     m3u: toM3U(playlist, playlistName()),
     csv: toCsv(playlist),
-    json: toJson(plan, playlist, { route: route.name, targetPace: formatPace(pace) }),
+    json: toJson(plan, playlist, workout ? { workout: workout.title } : { route: route!.name, targetPace: formatPace(pace!) }),
   };
 }
 
@@ -843,6 +888,16 @@ function showTip(plan: RunPlan, runTime: number): void {
   const section = plan.sections.find((s) => runTime < s.endTime) ?? plan.sections[plan.sections.length - 1];
   const rule = ruleById(section?.ruleId);
   const el = $('run-tip');
+  if (section?.label) {
+    // Séance : bloc en cours, allure visée et bloc suivant.
+    const next = plan.sections[plan.sections.indexOf(section) + 1];
+    const left = Math.max(0, section.endTime - runTime);
+    el.hidden = runTime >= plan.totalTime;
+    el.innerHTML =
+      `<strong>${esc(section.label)}</strong> · ${formatPace(section.pace)} /km · encore ${formatDuration(left)}` +
+      (next ? `<br><span class="muted">Ensuite : ${esc(next.label ?? '')} à ${formatPace(next.pace)} /km</span>` : '');
+    return;
+  }
   el.hidden = !rule || rule.id === 'flat' || runTime >= plan.totalTime;
   el.innerHTML = rule ? `<strong>${esc(rule.label)}</strong> · ${esc(rule.tip)}` : '';
 }
@@ -1018,7 +1073,7 @@ document.addEventListener('keydown', (ev) => {
 
 // ---------- Exports ----------
 
-const base = () => `runbpm-${slug(state.route?.name ?? 'parcours')}`;
+const base = () => `runbpm-${slug(workoutPanel.workout?.title ?? state.route?.name ?? 'parcours')}`;
 $('export-m3u').addEventListener('click', () => lastExport && download(`${base()}.m3u`, lastExport.m3u, 'audio/x-mpegurl'));
 $('export-csv').addEventListener('click', () => lastExport && download(`${base()}.csv`, lastExport.csv, 'text/csv'));
 $('export-json').addEventListener('click', () => lastExport && download(`${base()}.json`, lastExport.json, 'application/json'));

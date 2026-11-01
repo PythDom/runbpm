@@ -1326,3 +1326,72 @@ label.threshold span {
 .tag {
   white-space: nowrap;
 }
+
+/* ---------- Parcours ou séance ---------- */
+
+.seg {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+.seg button {
+  flex: 1;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.seg button[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
+}
+
+textarea {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: 0.85rem/1.4 ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  resize: vertical;
+}
+
+.workout-table td:first-child {
+  white-space: normal;
+}
+
+.workout-table td:nth-child(4) {
+  min-width: 0;
+}
+
+.rep-indent {
+  display: inline-block;
+  width: 2.2em;
+}
+
+input.pace-edit {
+  width: 62px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+input.pace-edit + .tag {
+  margin-left: 4px;
+}

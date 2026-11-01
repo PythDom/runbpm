@@ -58,6 +58,8 @@ export interface PlannedSection extends Section {
   cadence: number;
   /** Tranche de pente appliquée (si des règles par pente sont utilisées). */
   ruleId?: string;
+  /** Nom du bloc (séance d'entraînement : « Rapide (2/5) »…). */
+  label?: string;
   startTime: number;
   endTime: number;
 }

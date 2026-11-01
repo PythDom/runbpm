@@ -23,11 +23,22 @@ function niceStep(range: number, target: number): number {
  * Graphique SVG : profil d'altitude (aire), cadence cible (ligne en escalier, axe de droite)
  * et bandeau des morceaux placés sur la distance où ils seront écoutés.
  */
-export function renderChart(profile: ProfileSample[], plan: RunPlan, playlist: Playlist, tolerance: number): string {
+export function renderChart(
+  profile: ProfileSample[],
+  plan: RunPlan,
+  playlist: Playlist,
+  tolerance: number,
+  /** Séance d'entraînement : axe en minutes, sans profil d'altitude. */
+  timeAxis = false,
+): string {
   const plotW = W - M.left - M.right;
   const plotH = H - M.top - M.bottom - SONG_BAR - 8;
-  const total = plan.totalDistance;
-  const x = (d: number) => M.left + (d / total) * plotW;
+  const total = timeAxis ? plan.totalTime : plan.totalDistance;
+  const x = (v: number) => M.left + (v / total) * plotW;
+  // Position sur l'axe d'un instant de course, et des bornes d'une section.
+  const at = (time: number) => (timeAxis ? Math.min(time, plan.totalTime) : distanceAt(plan, time));
+  const from = (s: RunPlan['sections'][number]) => (timeAxis ? s.startTime : s.startDist);
+  const to = (s: RunPlan['sections'][number]) => (timeAxis ? s.endTime : s.endDist);
 
   const eles = profile.map((p) => p.ele);
   let eMin = Math.min(...eles);
@@ -55,12 +66,14 @@ export function renderChart(profile: ProfileSample[], plan: RunPlan, playlist: P
   const parts: string[] = [];
 
   // Grille + axe altitude (gauche)
-  const eStep = niceStep(eMax - eMin, 4);
-  for (let e = Math.ceil(eMin / eStep) * eStep; e <= eMax; e += eStep) {
-    parts.push(`<line class="grid" x1="${M.left}" x2="${W - M.right}" y1="${yE(e)}" y2="${yE(e)}"/>`);
-    parts.push(`<text class="axis" x="${M.left - 6}" y="${yE(e) + 4}" text-anchor="end">${Math.round(e)}</text>`);
+  if (!timeAxis) {
+    const eStep = niceStep(eMax - eMin, 4);
+    for (let e = Math.ceil(eMin / eStep) * eStep; e <= eMax; e += eStep) {
+      parts.push(`<line class="grid" x1="${M.left}" x2="${W - M.right}" y1="${yE(e)}" y2="${yE(e)}"/>`);
+      parts.push(`<text class="axis" x="${M.left - 6}" y="${yE(e) + 4}" text-anchor="end">${Math.round(e)}</text>`);
+    }
+    parts.push(`<text class="axis-title" x="${M.left - 6}" y="${M.top - 4}" text-anchor="end">m</text>`);
   }
-  parts.push(`<text class="axis-title" x="${M.left - 6}" y="${M.top - 4}" text-anchor="end">m</text>`);
 
   // Axe cadence (droite)
   const cStep = niceStep(cMax - cMin, 4);
@@ -71,20 +84,27 @@ export function renderChart(profile: ProfileSample[], plan: RunPlan, playlist: P
 
   // Aire d'altitude
   const base = M.top + plotH;
-  const line = profile.map((p) => `${x(p.dist).toFixed(1)},${yE(p.ele).toFixed(1)}`).join(' L');
-  parts.push(`<path class="elev-area" d="M${x(0)},${base} L${line} L${x(total)},${base} Z"/>`);
-  parts.push(`<path class="elev-line" d="M${line}"/>`);
+  if (!timeAxis && profile.length) {
+    const line = profile.map((p) => `${x(p.dist).toFixed(1)},${yE(p.ele).toFixed(1)}`).join(' L');
+    parts.push(`<path class="elev-area" d="M${x(0)},${base} L${line} L${x(total)},${base} Z"/>`);
+    parts.push(`<path class="elev-line" d="M${line}"/>`);
+  } else {
+    // Séance : grille horizontale sur l'axe des cadences.
+    for (let c = Math.ceil(cMin / cStep) * cStep; c <= cMax; c += cStep) {
+      parts.push(`<line class="grid" x1="${M.left}" x2="${W - M.right}" y1="${yC(c)}" y2="${yC(c)}"/>`);
+    }
+  }
 
   // Cadence cible en escalier
   const steps = plan.sections
-    .map((s) => `L${x(s.startDist).toFixed(1)},${yC(s.cadence).toFixed(1)} L${x(s.endDist).toFixed(1)},${yC(s.cadence).toFixed(1)}`)
+    .map((s) => `L${x(from(s)).toFixed(1)},${yC(s.cadence).toFixed(1)} L${x(to(s)).toFixed(1)},${yC(s.cadence).toFixed(1)}`)
     .join(' ');
   parts.push(`<path class="cad-line" d="M${steps.slice(1)}"/>`);
 
   // Cadence imposée par chaque morceau (tirets)
   for (const e of playlist.entries) {
-    const d0 = distanceAt(plan, e.startTime);
-    const d1 = distanceAt(plan, e.endTime);
+    const d0 = at(e.startTime);
+    const d1 = at(e.endTime);
     if (d1 <= d0) continue;
     parts.push(
       `<line class="song-cad" x1="${x(d0)}" x2="${x(d1)}" y1="${yC(e.effectiveCadence)}" y2="${yC(e.effectiveCadence)}"/>`,
@@ -94,8 +114,8 @@ export function renderChart(profile: ProfileSample[], plan: RunPlan, playlist: P
   // Bandeau des morceaux
   const barY = base + 8;
   playlist.entries.forEach((e, i) => {
-    const d0 = distanceAt(plan, e.startTime);
-    const d1 = distanceAt(plan, e.endTime);
+    const d0 = at(e.startTime);
+    const d1 = at(e.endTime);
     if (d1 <= d0) return;
     const cls = e.error <= tolerance + 1e-9 ? 'ok' : 'warn';
     const w = Math.max(1, x(d1) - x(d0) - 1.5);
@@ -108,12 +128,13 @@ export function renderChart(profile: ProfileSample[], plan: RunPlan, playlist: P
     );
   });
 
-  // Axe des distances
-  const dStep = niceStep(total / 1000, 8) * 1000;
+  // Axe des distances (ou des minutes pour une séance)
+  const unit = timeAxis ? 60 : 1000;
+  const dStep = niceStep(total / unit, 8) * unit;
   for (let d = 0; d <= total + 1; d += dStep) {
-    parts.push(`<text class="axis" x="${x(d)}" y="${H - 14}" text-anchor="middle">${(d / 1000).toLocaleString('fr-FR')}</text>`);
+    parts.push(`<text class="axis" x="${x(d)}" y="${H - 14}" text-anchor="middle">${(d / unit).toLocaleString('fr-FR')}</text>`);
   }
-  parts.push(`<text class="axis-title" x="${W - M.right}" y="${H - 14}" text-anchor="start" dx="6">km</text>`);
+  parts.push(`<text class="axis-title" x="${W - M.right}" y="${H - 14}" text-anchor="start" dx="6">${timeAxis ? 'min' : 'km'}</text>`);
 
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Profil du parcours, cadence cible et morceaux">${parts.join('')}</svg>`;
 }
