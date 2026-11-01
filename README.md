@@ -143,6 +143,40 @@ L’import CSV/JSON reste possible (voir *Formats d’entrée*).
    le tempo colle le mieux à la cadence cible **sur toute sa durée d’écoute**. Les services de streaming
    jouent au tempo original : seuls les morceaux déjà au bon BPM (ou à mi-tempo) sont retenus.
 
+### Séances d’entraînement (fractionné)
+
+Au lieu d’un parcours, l’écran 1 accepte une **séance** copiée-collée depuis COROS, Garmin… (bouton
+« Séance d’entraînement ») :
+
+```
+Warm Up
+1.00 km
+Pace | 5'30''-6'30'' min/km
+Repeat 4 Times
+Training
+04:00
+Pace | 4'30''-5'10'' min/km
+Rest
+03:00
+Pace | 5'00''-6'00'' min/km
+Cool Down
+10:00
+```
+
+- Chaque bloc : un nom, une durée (`04:00`, `30 s`, `10 min`) ou une distance (`1.00 km`), une allure
+  facultative (`Pace | 4'30''-5'10''`, milieu de la plage retenu). `Repeat N Times` répète les blocs
+  d’effort et de récupération qui suivent (jusqu’au retour au calme ou à l’endurance) ; la durée
+  totale annoncée (`44:00 8.31km`) départage les cas douteux.
+- Un bloc sans allure est **estimé** : effort ≈ 25 % plus rapide que l’endurance, récupération ≈ 12 %
+  plus lente, marche à 115 pas/min. Toutes les allures sont modifiables dans le tableau.
+- Cadence de chaque bloc : celle du profil coureur à cette vitesse (calibrage, cadence au plat saisie,
+  ou estimation).
+- Avec **Navidrome**, chaque bloc a sa musique : les morceaux sont **coupés aux changements d’allure**
+  (un sprint de 30 s commence au quart du morceau, après l’introduction). Avec Spotify ou un lecteur
+  externe, les morceaux ne peuvent pas être coupés : la playlist suit la cadence moyenne.
+- Pendant la course, l’écran Courir affiche le bloc en cours, son allure, le temps restant et le bloc
+  suivant.
+
 ### Cadence selon la pente
 
 Principe : garder une cadence à peu près stable et laisser la longueur de foulée absorber la pente.
@@ -318,6 +352,7 @@ src/core/          moteur, sans dépendance au DOM (testé)
   export.ts          M3U / CSV / JSON / liste pour transfert (Deezer)
   demo.ts            bibliothèque fictive de démonstration
   slopeRules.ts      tranches de pente → cadence, conseils de course
+  workout.ts         séances d’entraînement : lecture du texte, allures, plan par bloc
 src/services/spotify.ts   connexion OAuth PKCE, recherche, création de playlist, état du lecteur
 src/services/subsonic.ts  client Subsonic / Navidrome (jeton, search3, stream, Range, playlists)
 src/services/sharedDb.ts  client de la base partagée, fusion avec la bibliothèque locale
@@ -332,6 +367,7 @@ src/ui/            interface (TypeScript sans framework)
   sharedPanel.ts     réglage de la base partagée (adresse, code d’accès)
   native.ts          pont vers l’application Android (service de course, écran allumé)
   pager.ts           écrans par étape sur téléphone (glissement, onglets)
+  workoutPanel.ts    saisie de la séance et tableau des blocs (allures modifiables)
   companion.ts       compagnon de course (chronomètre / synchro Spotify, Wake Lock)
   metronome.ts       métronome Web Audio
   spotifyPanel.ts    connexion Spotify

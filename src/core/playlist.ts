@@ -30,7 +30,15 @@ export interface PlaylistOptions {
    * naturellement au bon tempo conviennent alors.
    */
   canStretch?: (song: Song) => boolean;
+  /**
+   * Instants (s) où les morceaux peuvent être coupés (changements d'allure d'une séance
+   * fractionnée). Seul le lecteur intégré sait couper un morceau ; ailleurs, laisser vide.
+   */
+  cutAt?: number[];
 }
+
+/** En deçà, un bout de bloc restant n'a pas son propre morceau : le suivant déborde dessus. */
+const MIN_CUT_WINDOW = 15;
 
 export const DEFAULT_PLAYLIST_OPTIONS: PlaylistOptions = {
   tolerance: 0.03,
@@ -55,6 +63,10 @@ export interface PlaylistEntry {
   /** Écart relatif moyen entre le morceau et la cadence cible. */
   error: number;
   repeated: boolean;
+  /** Morceau arrêté avant sa fin (changement de bloc). */
+  cut?: boolean;
+  /** Position de départ dans le morceau, en secondes du morceau (morceau coupé court). */
+  songStart?: number;
 }
 
 export interface Playlist {
@@ -85,6 +97,7 @@ interface Candidate {
   error: number;
   cost: number;
   repeated: boolean;
+  cut: boolean;
 }
 
 function evaluate(
@@ -93,16 +106,28 @@ function evaluate(
   song: Song,
   multiplier: 1 | 2,
   opts: PlaylistOptions,
+  limit = Infinity,
 ): Omit<Candidate, 'cost' | 'repeated'> {
   const natural = song.bpm * multiplier;
-  // Premier passage : cadence moyenne sur la durée naturelle du morceau.
-  const avg = averageOver(plan, t, t + song.duration, (c) => c);
+  // Premier passage : cadence moyenne sur la durée naturelle du morceau (ou jusqu'à la coupure).
+  const avg = averageOver(plan, t, Math.min(t + song.duration, limit), (c) => c);
   const maxStretch = opts.canStretch && !opts.canStretch(song) ? 0 : opts.maxStretch;
   const rate = maxStretch > 0 ? Math.min(1 + maxStretch, Math.max(1 - maxStretch, avg / natural)) : 1;
-  const duration = song.duration / rate;
+  const full = song.duration / rate;
+  const cut = t + full > limit;
+  const duration = cut ? limit - t : full;
   const effective = natural * rate;
   const error = averageOver(plan, t, t + duration, (c) => Math.abs(effective - c) / c);
-  return { song, multiplier, rate, duration, error };
+  return { song, multiplier, rate, duration, error, cut };
+}
+
+/**
+ * Départ d'un morceau coupé court : au quart du morceau (après l'introduction, souvent plus calme)
+ * quand il en reste assez, sinon au début.
+ */
+function songStartFor(songDuration: number, played: number): number {
+  if (played >= songDuration * 0.6) return 0;
+  return Math.round(Math.min(songDuration * 0.25, songDuration - played));
 }
 
 export function generatePlaylist(plan: RunPlan, library: Song[], options: Partial<PlaylistOptions> = {}): Playlist {
@@ -118,14 +143,20 @@ export function generatePlaylist(plan: RunPlan, library: Song[], options: Partia
   let t = 0;
   let guard = 0;
 
+  const cuts = [...(opts.cutAt ?? [])].sort((a, b) => a - b);
   while (t < plan.totalTime - 1 && guard++ < 1000) {
+    // Prochaine coupure possible, assez loin pour mériter son propre morceau.
+    const limit = cuts.find((b) => b >= t + MIN_CUT_WINDOW) ?? Infinity;
     const candidates: Candidate[] = [];
     for (const song of library) {
       const used = useCount.get(song.id) ?? 0;
       if (used > 0 && !opts.allowRepeat) continue;
       const multipliers: (1 | 2)[] = opts.allowHalfTime ? [1, 2] : [1];
       for (const m of multipliers) {
-        const ev = evaluate(plan, t, song, m, opts);
+        const ev = evaluate(plan, t, song, m, opts, limit);
+        // Un morceau qui s'arrête juste avant la coupure laisserait un bout de bloc trop court.
+        const gap = limit - (t + ev.duration);
+        const shortGap = !ev.cut && gap > 0 && gap < MIN_CUT_WINDOW * 2 ? 0.03 : 0;
         // Coût : écart de tempo, pénalité légère sur le time-stretch et le mi-tempo,
         // forte pénalité sur les répétitions, bruit pour varier entre morceaux équivalents.
         const cost =
@@ -133,7 +164,8 @@ export function generatePlaylist(plan: RunPlan, library: Song[], options: Partia
           Math.abs(ev.rate - 1) * 0.5 +
           (m === 2 ? 0.002 : 0) +
           used * 0.05 +
-          random() * opts.tolerance * 0.3;
+          random() * opts.tolerance * 0.3 +
+          shortGap;
         candidates.push({ ...ev, cost, repeated: used > 0 });
       }
     }
@@ -161,6 +193,7 @@ export function generatePlaylist(plan: RunPlan, library: Song[], options: Partia
       effectiveCadence: Math.round(best.song.bpm * best.multiplier * best.rate * 10) / 10,
       error: best.error,
       repeated: best.repeated,
+      ...(best.cut ? { cut: true, songStart: songStartFor(best.song.duration, best.duration * best.rate) } : {}),
     });
     useCount.set(best.song.id, (useCount.get(best.song.id) ?? 0) + 1);
     t += best.duration;

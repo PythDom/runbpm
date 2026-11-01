@@ -17,15 +17,30 @@
     <main id="pager" class="pager">
       <section class="screen" id="screen-route" data-title="Parcours">
           <div class="card">
-            <h2><span class="step">1</span> Parcours</h2>
-            <label class="file">
-              <input type="file" id="route-file" accept=".gpx,.tcx,.json" />
-              <span>Charger un fichier GPX, TCX ou JSON</span>
-            </label>
-            <div class="row">
-              <button type="button" class="link" id="route-sample">Essayer la boucle vallonnée d’exemple</button>
+            <h2><span class="step">1</span> Parcours ou séance</h2>
+            <div id="plan-mode" class="seg" role="group" aria-label="Type de sortie">
+              <button type="button" data-mode="route" aria-pressed="true">Parcours</button>
+              <button type="button" data-mode="workout" aria-pressed="false">Séance d’entraînement</button>
             </div>
-            <div id="route-summary" class="summary muted">Aucun parcours chargé.</div>
+            <div id="route-panel">
+              <label class="file">
+                <input type="file" id="route-file" accept=".gpx,.tcx,.json" />
+                <span>Charger un fichier GPX, TCX ou JSON</span>
+              </label>
+              <div class="row">
+                <button type="button" class="link" id="route-sample">Essayer la boucle vallonnée d’exemple</button>
+              </div>
+              <div id="route-summary" class="summary muted">Aucun parcours chargé.</div>
+            </div>
+            <div id="workout-panel" hidden>
+              <label>Séance (copiée depuis COROS, Garmin…)
+                <textarea id="workout-text" rows="7" spellcheck="false"
+                  placeholder="Nom du bloc, durée (04:00) ou distance (1.00 km), allure (Pace | 4'30''-5'10''), « Repeat 4 Times »…"></textarea>
+              </label>
+              <div class="row"><button type="button" class="link" id="workout-sample">Exemple : 4 × 4 min / 3 min</button></div>
+              <div id="workout-summary" class="summary muted">Aucune séance.</div>
+              <div id="workout-steps"></div>
+            </div>
           </div>
         <button type="button" class="next" data-go="1">Allure et cadence <span aria-hidden="true">→</span></button>
       </section>
@@ -41,6 +56,8 @@
                 <input type="number" id="speed" value="10.9" min="4" max="25" step="0.1" />
               </label>
             </div>
+            <p id="workout-pace-hint" class="small muted" hidden>Séance d’entraînement : chaque bloc a sa propre allure (écran
+              Parcours). Celle-ci ne sert qu’à estimer les blocs sans allure ; votre profil donne la cadence à chaque vitesse.</p>
             <label>Stratégie
               <select id="mode">
                 <option value="pace">Allure constante (même vitesse partout)</option>
@@ -165,7 +182,7 @@
           <div class="card-head">
             <h2>Profil, cadence et morceaux</h2>
             <div class="legend">
-              <span><i class="sw elev"></i>Altitude</span>
+              <span id="legend-elev"><i class="sw elev"></i>Altitude</span>
               <span><i class="sw cad"></i>Cadence cible</span>
               <span><i class="sw ok"></i>Morceau dans la tolérance</span>
               <span><i class="sw warn"></i>Hors tolérance</span>

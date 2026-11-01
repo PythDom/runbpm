@@ -63,8 +63,17 @@ export class RunPlayer {
     this.audio.mozPreservesPitch = true;
     this.audio.webkitPreservesPitch = true;
     this.audio.addEventListener('ended', () => this.advance(1, true));
-    this.audio.addEventListener('timeupdate', () => this.emit());
-    this.audio.addEventListener('loadedmetadata', () => this.emit());
+    this.audio.addEventListener('timeupdate', () => {
+      // Morceau coupé (séance fractionnée) : on passe au suivant à la fin du bloc.
+      if (this.playing && this.audio.currentTime >= this.stopAt() - 0.08) this.advance(1, true);
+      else this.emit();
+    });
+    this.audio.addEventListener('loadedmetadata', () => {
+      // Départ en cours de morceau (morceau coupé court) si le fragment #t= n'a pas été appliqué.
+      const start = this.songStart();
+      if (start > 0 && this.audio.currentTime < start - 0.5) this.audio.currentTime = start;
+      this.emit();
+    });
     this.audio.addEventListener('error', () => {
       if (this.loadedIndex < 0 || !this.audio.getAttribute('src')) return;
       const t = this.tracks[this.loadedIndex];
@@ -160,7 +169,9 @@ export class RunPlayer {
   seek(fraction: number): void {
     this.ensureLoaded();
     const f = Math.min(1, Math.max(0, fraction));
-    if (Number.isFinite(this.audio.duration)) this.audio.currentTime = f * this.audio.duration;
+    const start = this.songStart();
+    const end = Math.min(this.stopAt(), Number.isFinite(this.audio.duration) ? this.audio.duration : Infinity);
+    if (Number.isFinite(end)) this.audio.currentTime = start + f * (end - start);
     this.emit();
   }
 
@@ -182,14 +193,26 @@ export class RunPlayer {
     return this.tracks[this.index]?.entry.playbackRate ?? 1;
   }
 
+  /** Position de départ dans le morceau courant (secondes du morceau). */
+  private songStart(): number {
+    return this.tracks[this.index]?.entry.songStart ?? 0;
+  }
+
+  /** Position du morceau où s'arrêter (fin du bloc pour un morceau coupé), en secondes du morceau. */
+  private stopAt(): number {
+    const e = this.tracks[this.index]?.entry;
+    return e?.cut ? this.songStart() + (e.endTime - e.startTime) * e.playbackRate : Infinity;
+  }
+
   private position(): number {
-    return this.loadedIndex === this.index ? this.audio.currentTime / this.rate() : 0;
+    return this.loadedIndex === this.index ? Math.max(0, this.audio.currentTime - this.songStart()) / this.rate() : 0;
   }
 
   private duration(): number {
     const t = this.tracks[this.index];
     if (!t) return 0;
-    if (this.loadedIndex === this.index && Number.isFinite(this.audio.duration)) return this.audio.duration / this.rate();
+    if (t.entry.cut) return t.entry.endTime - t.entry.startTime;
+    if (this.loadedIndex === this.index && Number.isFinite(this.audio.duration)) return (this.audio.duration - this.songStart()) / this.rate();
     return t.entry.endTime - t.entry.startTime;
   }
 
@@ -217,7 +240,8 @@ export class RunPlayer {
   private ensureLoaded(): void {
     const t = this.tracks[this.index];
     if (!t || this.loadedIndex === this.index) return;
-    this.audio.src = t.url;
+    const start = t.entry.songStart ?? 0;
+    this.audio.src = start > 0 ? `${t.url}#t=${start}` : t.url;
     this.loadedIndex = this.index;
   }
 
