@@ -12,6 +12,8 @@ export class Pager {
   private readonly mq = window.matchMedia(MOBILE);
   private index = 0;
   private frame = 0;
+  /** Étapes sautées (ex. Allure en mode séance) : ni onglet, ni écran sur téléphone. */
+  private readonly skipped = new Set<number>();
 
   constructor(
     private readonly pager: HTMLElement,
@@ -55,8 +57,31 @@ export class Pager {
       this.screens[i].scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
       return;
     }
+    i = this.nearestShown(i);
     this.setActive(i);
-    this.pager.scrollTo({ left: i * this.pager.clientWidth, behavior: smooth ? 'smooth' : 'auto' });
+    this.pager.scrollTo({ left: this.shown().indexOf(i) * this.pager.clientWidth, behavior: smooth ? 'smooth' : 'auto' });
+  }
+
+  /** Saute (ou rétablit) une étape sur téléphone ; si c'est l'écran courant, on passe au suivant. */
+  setSkipped(i: number, skip: boolean): void {
+    if (this.skipped.has(i) === skip) return;
+    if (skip) this.skipped.add(i);
+    else this.skipped.delete(i);
+    this.screens[i]?.classList.toggle('skipped', skip);
+    this.tabs[i]?.classList.toggle('skipped', skip);
+    if (skip && this.index === i) this.setActive(this.nearestShown(i));
+    this.snap();
+  }
+
+  /** Étapes affichées sur téléphone, dans l'ordre. */
+  private shown(): number[] {
+    return this.screens.map((_, k) => k).filter((k) => !this.skipped.has(k));
+  }
+
+  /** L'étape elle-même si elle est affichée, sinon la suivante (ou la précédente en fin de liste). */
+  private nearestShown(i: number): number {
+    const shown = this.shown();
+    return shown.find((k) => k >= i) ?? shown[shown.length - 1] ?? 0;
   }
 
   /** Marque une étape comme faite (coche sur l'onglet) ou à faire (point). */
@@ -66,13 +91,13 @@ export class Pager {
   }
 
   private snap(): void {
-    if (this.mobile) this.pager.scrollTo({ left: this.index * this.pager.clientWidth, behavior: 'auto' });
+    if (this.mobile) this.pager.scrollTo({ left: this.shown().indexOf(this.index) * this.pager.clientWidth, behavior: 'auto' });
   }
 
   private sync(): void {
     if (!this.mobile || this.pager.clientWidth === 0) return;
-    const i = Math.round(this.pager.scrollLeft / this.pager.clientWidth);
-    if (i !== this.index && i >= 0 && i < this.screens.length) this.setActive(i);
+    const i = this.shown()[Math.round(this.pager.scrollLeft / this.pager.clientWidth)];
+    if (i !== undefined && i !== this.index) this.setActive(i);
   }
 
   private setActive(i: number): void {
