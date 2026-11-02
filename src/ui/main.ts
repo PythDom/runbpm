@@ -684,7 +684,12 @@ const pager = new Pager($('pager'), $('tabbar'), $('screen-title'));
 /** Coche les onglets des étapes faites (après chaque recalcul). */
 function refreshSteps(): void {
   const svc = service();
-  pager.setDone(0, workoutPanel.mode === 'workout' ? !!workoutPanel.workout : !!state.route);
+  // Séance : l'allure de chaque bloc vient de la séance, l'étape Allure est sautée sur téléphone.
+  const workoutMode = workoutPanel.mode === 'workout';
+  pager.setSkipped(1, workoutMode);
+  $('next-route').dataset.go = workoutMode ? '2' : '1';
+  $('next-route').firstChild!.textContent = workoutMode ? 'Musique ' : 'Allure et cadence ';
+  pager.setDone(0, workoutMode ? !!workoutPanel.workout : !!state.route);
   pager.setDone(1, !!parsePace(paceInput.value));
   pager.setDone(2, state.library.length > 0);
   pager.setDone(3, svc === 'navidrome' ? navidrome.connected : svc === 'spotify' ? spotify.connected : true);

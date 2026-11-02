@@ -1161,7 +1161,8 @@ label.threshold span {
   .tabbar {
     flex: none;
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-auto-columns: 1fr;
+    grid-auto-flow: column;
     padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--border);
     background: var(--surface);
@@ -1394,4 +1395,12 @@ input.pace-edit {
 
 input.pace-edit + .tag {
   margin-left: 4px;
+}
+
+/* Étape sautée (Allure en mode séance) : retirée du parcours sur téléphone. */
+@media (max-width: 899px) {
+  .screen.skipped,
+  .tabbar button.skipped {
+    display: none;
+  }
 }
