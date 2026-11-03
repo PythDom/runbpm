@@ -48,6 +48,44 @@ describe('trackBeats', () => {
     expect(m.recall).toBeGreaterThan(0.95);
   });
 
+  it('suit une forte accélération (120 → 190 BPM)', () => {
+    const { out, beats } = rampLoop(120, 190, 60);
+    const g = trackBeats(out, 22050, 152)!;
+    const m = match(g.beats, beats.slice(2, -2), 0.03);
+    expect(m.recall).toBeGreaterThan(0.95);
+  });
+
+  it('suit un changement brusque de tempo (140 puis 185 BPM)', () => {
+    const a = drumLoop(140, 30, 22050);
+    const b = drumLoop(185, 30, 22050, { seed: 3 });
+    const out = new Float32Array(a.length + b.length);
+    out.set(a);
+    out.set(b, a.length);
+    const ref = [
+      ...Array.from({ length: Math.floor((29.5 * 140) / 60) }, (_, k) => (k * 60) / 140),
+      ...Array.from({ length: Math.floor((29.5 * 185) / 60) }, (_, k) => 30 + (k * 60) / 185),
+    ].slice(2, -2);
+    const g = trackBeats(out, 22050, 162)!;
+    const m = match(g.beats, ref, 0.03);
+    expect(m.recall).toBeGreaterThan(0.95);
+  });
+
+  it('place chaque temps entre deux trames (écart quadratique < 4 ms)', () => {
+    const bpm = 150;
+    const g = trackBeats(drumLoop(bpm, 30, 22050), 22050, bpm)!;
+    const ref = Array.from({ length: Math.floor((29 * bpm) / 60) }, (_, k) => (k * 60) / bpm).slice(1);
+    let ss = 0;
+    let n = 0;
+    for (const r of ref) {
+      const e = g.beats.reduce((best, x) => (Math.abs(x - r) < Math.abs(best - r) ? x : best), Infinity);
+      if (Math.abs(e - r) <= 0.05) {
+        ss += (e - r) ** 2;
+        n++;
+      }
+    }
+    expect(Math.sqrt(ss / n)).toBeLessThan(0.004);
+  });
+
   it('refuse un signal trop court ou un tempo absurde', () => {
     expect(trackBeats(new Float32Array(22050), 22050, 170)).toBeUndefined();
     expect(trackBeats(drumLoop(170, 10, 22050), 22050, 0)).toBeUndefined();

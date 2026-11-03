@@ -16,6 +16,116 @@ export interface BeatGrid {
   bpm: number;
 }
 
+/**
+ * Période locale du battement (en trames) à chaque trame. Par fenêtres de 8 s (tous les 1 s), chaque
+ * décalage à ±35 % de la période globale est noté par son peigne (1 à 4 temps), normalisé ; on garde le
+ * chemin à travers les fenêtres qui a le meilleur score tout en variant doucement (Viterbi, un coût par
+ * changement de tempo), interpolé linéairement entre fenêtres. Avec une période unique pour tout le
+ * morceau, le suivi décroche dès que le tempo s'écarte de plus de ~15 % (morceau joué sans clic,
+ * refrain plus rapide). Repris de MusicDAWM (BeatDetect::local_period).
+ */
+export function localPeriod(env: Float64Array, fps: number, period: number): Float64Array {
+  const n = env.length;
+  const per = new Float64Array(n).fill(period);
+  const win = Math.round(8 * fps);
+  const hop = Math.max(1, Math.round(fps));
+  if (n < 2 * win) return per;
+  const lo = period / 1.35;
+  const hi = period * 1.35;
+  const maxLag = Math.ceil(4 * hi) + 2;
+  const lags: number[] = [];
+  for (let lag = lo; lag <= hi; lag += 0.25) lags.push(lag);
+  const L = lags.length;
+  const centres: number[] = [];
+  const scores: Float64Array[] = [];
+  const ac = new Float64Array(maxLag + 1);
+  for (let c = win / 2; c + win / 2 <= n; c += hop) {
+    const a = Math.round(c - win / 2);
+    for (let lag = 1; lag <= maxLag; lag++) {
+      let s = 0;
+      for (let i = a; i < a + win && i + lag < n; i++) s += env[i] * env[i + lag];
+      ac[lag] = s;
+    }
+    const row = new Float64Array(L);
+    let max = 0;
+    for (let j = 0; j < L; j++) {
+      let s = 0;
+      for (let k = 1; k <= 4; k++) {
+        const pos = k * lags[j];
+        const i = Math.floor(pos);
+        const t = pos - i;
+        s += i + 1 <= maxLag ? ac[i] * (1 - t) + ac[i + 1] * t : 0;
+      }
+      row[j] = s;
+      if (s > max) max = s;
+    }
+    for (let j = 0; j < L; j++) row[j] = max > 0 ? Math.max(0, row[j] / max) : 0;
+    centres.push(c);
+    scores.push(row);
+  }
+  // Viterbi : changer de tempo d'un rapport r entre deux fenêtres coûte CHANGE·log(r)² (3 % ≈ 0,04).
+  const CHANGE = 50;
+  const W = scores.length;
+  const logLag = lags.map((l) => Math.log(l));
+  let d = Float64Array.from(scores[0]);
+  const from: Int32Array[] = [new Int32Array(L)];
+  for (let w = 1; w < W; w++) {
+    const nd = new Float64Array(L);
+    const fr = new Int32Array(L);
+    for (let j = 0; j < L; j++) {
+      let best = -Infinity;
+      let arg = 0;
+      for (let i = 0; i < L; i++) {
+        const r = logLag[j] - logLag[i];
+        const v = d[i] - CHANGE * r * r;
+        if (v > best) {
+          best = v;
+          arg = i;
+        }
+      }
+      nd[j] = best + scores[w][j];
+      fr[j] = arg;
+    }
+    d = nd;
+    from.push(fr);
+  }
+  const path = new Float64Array(W);
+  let j = 0;
+  for (let i = 1; i < L; i++) if (d[i] > d[j]) j = i;
+  for (let w = W - 1; w >= 0; w--) {
+    path[w] = lags[j];
+    j = from[w][j];
+  }
+  for (let t = 0; t < n; t++) {
+    if (t <= centres[0]) per[t] = path[0];
+    else if (t >= centres[W - 1]) per[t] = path[W - 1];
+    else {
+      const a = Math.floor((t - centres[0]) / hop);
+      const b = Math.min(a + 1, W - 1);
+      const f = b > a ? (t - centres[a]) / (centres[b] - centres[a]) : 0;
+      per[t] = path[a] * (1 - f) + path[b] * f;
+    }
+  }
+  return per;
+}
+
+/**
+ * Instant d'un temps entre deux trames : sommet de la courbe d'attaques à ±1 trame de la trame suivie,
+ * affiné par une parabole passant par ses voisines (précision bien meilleure que la trame de 11,6 ms).
+ */
+export function subframe(env: Float64Array, f: number): number {
+  const n = env.length;
+  let m = f;
+  for (let k = Math.max(0, f - 1); k <= Math.min(n - 1, f + 1); k++) if (env[k] > env[m]) m = k;
+  if (m <= 0 || m >= n - 1) return m;
+  const a = env[m - 1];
+  const b = env[m];
+  const c = env[m + 1];
+  const den = a - 2 * b + c;
+  if (!(b > 0) || Math.abs(den) < 1e-12) return m;
+  return m + Math.max(-0.5, Math.min(0.5, (0.5 * (a - c)) / den));
+}
+
 /** Contrainte de régularité : plus elle est forte, plus les intervalles restent proches de la période. */
 const TIGHTNESS = 100;
 
@@ -45,17 +155,17 @@ export function trackBeats(samples: Float32Array, sampleRate: number, bpm: numbe
 
   const score = new Float64Array(n);
   const back = new Int32Array(n).fill(-1);
-  const minLag = Math.max(1, Math.round(period / 2));
-  const maxLag = Math.round(period * 2);
-  // Coût de transition pré-calculé par décalage.
-  const cost = new Float64Array(maxLag + 1);
-  for (let lag = minLag; lag <= maxLag; lag++) cost[lag] = -TIGHTNESS * Math.log(lag / period) ** 2;
+  // Période locale : le suivi accompagne les variations de tempo au fil du morceau.
+  const per = localPeriod(env, fps, period);
 
   for (let t = 0; t < n; t++) {
     let best = -Infinity;
     let arg = -1;
+    const p = per[t];
+    const minLag = Math.max(1, Math.round(p / 2));
+    const maxLag = Math.round(p * 2);
     for (let lag = minLag; lag <= maxLag && t - lag >= 0; lag++) {
-      const s = score[t - lag] + cost[lag];
+      const s = score[t - lag] - TIGHTNESS * Math.log(lag / p) ** 2;
       if (s > best) {
         best = s;
         arg = t - lag;
@@ -67,7 +177,7 @@ export function trackBeats(samples: Float32Array, sampleRate: number, bpm: numbe
 
   // Dernier temps : meilleur score dans la dernière période.
   let end = n - 1;
-  for (let t = Math.max(0, n - Math.round(period)); t < n; t++) if (score[t] > score[end]) end = t;
+  for (let t = Math.max(0, n - Math.round(per[n - 1])); t < n; t++) if (score[t] > score[end]) end = t;
   const frames: number[] = [];
   for (let t = end; t >= 0; t = back[t]) frames.push(t);
   frames.reverse();
@@ -76,7 +186,8 @@ export function trackBeats(samples: Float32Array, sampleRate: number, bpm: numbe
   // Trame f → centre de sa fenêtre d'analyse, corrigé du décalage de détection.
   const hopSeconds = 1 / fps;
   const halfWindow = 512 / rate;
-  const beats = frames.map((f) => Math.max(0, f * hopSeconds + halfWindow + ONSET_OFFSET_SECONDS));
+  // Chaque temps entre deux trames (sommet de l'attaque, interpolé).
+  const beats = frames.map((f) => Math.max(0, subframe(env, f) * hopSeconds + halfWindow + ONSET_OFFSET_SECONDS));
   // Tempo moyen par régression linéaire des temps sur leur rang.
   const k = beats.length;
   let sx = 0;

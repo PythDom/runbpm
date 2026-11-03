@@ -230,7 +230,9 @@ Pour un serveur auto-hébergé compatible Subsonic / OpenSubsonic (Navidrome, Go
   4 % par défaut, `preservesPitch`), barre de position, morceau suivant / précédent, commandes de l’écran
   verrouillé (Media Session), métronome superposable.
 - **Métronome calé sur les temps** : chaque morceau est décodé et ses temps repérés (suivi des temps par
-  programmation dynamique, Ellis 2007 ; ±6 ms des temps annotés par madmom sur de vrais morceaux) ; les
+  programmation dynamique, Ellis 2007, avec un tempo local qui suit les accélérations et les changements de
+  tempo du morceau, et des temps placés entre deux trames d’analyse ; ±6 ms des temps annotés par madmom
+  sur de vrais morceaux) ; les
   clics sont planifiés sur ces temps d’après la position de lecture et la vitesse ajustée, y compris après
   un déplacement dans le morceau. Un réglage « Décalage des clics » (±150 ms, mémorisé par appareil)
   compense la latence audio (écouteurs Bluetooth…). Tant que les temps ne sont pas repérés, le
@@ -339,7 +341,7 @@ src/core/          moteur, sans dépendance au DOM (testé)
   pacing.ts          plan de course : vitesse, cadence, modèle de Minetti
   library.ts         bibliothèque, import CSV/JSON
   bpm.ts             détection du tempo (flux spectral, autocorrélation, peigne)
-  beats.ts           suivi des temps (programmation dynamique) et affinage du tempo
+  beats.ts           suivi des temps (programmation dynamique, tempo local) et affinage du tempo
   md5.ts             MD5 pour l’authentification Subsonic
   fit.ts             lecture des fichiers FIT (montres)
   activity.ts        sortie enregistrée → tronçons vitesse / pente / cadence
