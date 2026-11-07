@@ -90,6 +90,18 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.call("GET", "/api/selection", self.alice)[1], {"user": "alice", "selected": ["1", "2"]})
         self.assertEqual(self.call("GET", "/api/selection", self.bob)[1]["selected"], ["9"])
 
+    def test_exclusions_separate_from_selection(self):
+        self.call("PUT", "/api/selection", self.alice, {"selected": ["1"]})
+        self.call("PUT", "/api/excluded", self.alice, {"selected": ["7", "8"]})
+        self.assertEqual(self.call("GET", "/api/selection", self.alice)[1]["selected"], ["1"])
+        self.assertEqual(self.call("GET", "/api/excluded", self.alice)[1]["selected"], ["7", "8"])
+        self.assertEqual(self.call("GET", "/api/excluded", self.bob)[1]["selected"], [])
+        data = self.app.store.export()
+        self.assertEqual(data["exclusions"], {"alice": ["7", "8"]})
+        other = Store(os.path.join(self.tmp.name, "copy2.sqlite"))
+        other.import_data(json.loads(json.dumps(data)))
+        self.assertEqual(other.song_list("excluded", "alice"), ["7", "8"])
+
     def test_export_import_and_persistence(self):
         self.call("POST", "/api/songs", self.alice, {"songs": [song("42", 176)]})
         self.call("PUT", "/api/selection", self.alice, {"selected": ["42"]})

@@ -1404,3 +1404,11 @@ input.pace-edit + .tag {
     display: none;
   }
 }
+
+tr.excluded td {
+  opacity: 0.5;
+}
+
+tr.excluded td.actions {
+  opacity: 1;
+}

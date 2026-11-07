@@ -58,6 +58,11 @@ CREATE TABLE IF NOT EXISTS selections (
   song_id TEXT NOT NULL,
   PRIMARY KEY (user, song_id)
 );
+CREATE TABLE IF NOT EXISTS exclusions (
+  user TEXT NOT NULL,
+  song_id TEXT NOT NULL,
+  PRIMARY KEY (user, song_id)
+);
 """
 
 
@@ -206,34 +211,48 @@ class Store:
                 raise HttpError(404, "Morceau inconnu de la base partagée.")
             return self.song_json(db.execute("SELECT * FROM songs WHERE id = ?", (song_id,)).fetchone())
 
-    # ---------- sélections ----------
+    # ---------- listes de morceaux par utilisateur : cochés pour courir, exclus des playlists ----------
 
-    def selection(self, user: str) -> list[str]:
+    LISTS = {"selection": "selections", "excluded": "exclusions"}
+
+    def song_list(self, name: str, user: str) -> list[str]:
+        table = self.LISTS[name]
         with self.connect() as db:
-            return [r[0] for r in db.execute("SELECT song_id FROM selections WHERE user = ? ORDER BY song_id", (user,))]
+            return [r[0] for r in db.execute(f"SELECT song_id FROM {table} WHERE user = ? ORDER BY song_id", (user,))]
 
-    def set_selection(self, user: str, ids) -> list[str]:
+    def set_song_list(self, name: str, user: str, ids) -> list[str]:
+        table = self.LISTS[name]
         clean = list(dict.fromkeys(x[:200] for x in (ids if isinstance(ids, list) else []) if isinstance(x, str) and x))[:200000]
         with self.connect() as db:
-            db.execute("DELETE FROM selections WHERE user = ?", (user,))
-            db.executemany("INSERT INTO selections (user, song_id) VALUES (?, ?)", [(user, i) for i in clean])
+            db.execute(f"DELETE FROM {table} WHERE user = ?", (user,))
+            db.executemany(f"INSERT INTO {table} (user, song_id) VALUES (?, ?)", [(user, i) for i in clean])
         return clean
+
+    def selection(self, user: str) -> list[str]:
+        return self.song_list("selection", user)
+
+    def set_selection(self, user: str, ids) -> list[str]:
+        return self.set_song_list("selection", user, ids)
 
     # ---------- sauvegarde ----------
 
     def export(self) -> dict:
+        lists: dict[str, dict[str, list[str]]] = {}
         with self.connect() as db:
-            sel: dict[str, list[str]] = {}
-            for r in db.execute("SELECT user, song_id FROM selections ORDER BY user, song_id"):
-                sel.setdefault(r["user"], []).append(r["song_id"])
-        return {"version": 1, "songs": {s["id"]: s for s in self.songs()}, "selections": sel}
+            for name, table in self.LISTS.items():
+                per_user: dict[str, list[str]] = {}
+                for r in db.execute(f"SELECT user, song_id FROM {table} ORDER BY user, song_id"):
+                    per_user.setdefault(r["user"], []).append(r["song_id"])
+                lists[name] = per_user
+        return {"version": 1, "songs": {s["id"]: s for s in self.songs()}, "selections": lists["selection"], "exclusions": lists["excluded"]}
 
     def import_data(self, data: dict, user: str = "import") -> dict:
         songs = data.get("songs", [])
         stats = self.upsert(list(songs.values()) if isinstance(songs, dict) else songs, user)
-        for name, ids in (data.get("selections") or {}).items():
-            if NAME_RE.match(name):
-                self.set_selection(name, ids)
+        for key, list_name in (("selections", "selection"), ("exclusions", "excluded")):
+            for name, ids in (data.get(key) or {}).items():
+                if NAME_RE.match(name):
+                    self.set_song_list(list_name, name, ids)
         return stats
 
 
@@ -322,10 +341,11 @@ def create_app(db_path: str | None = None):
             return 200, store.upsert(body.get("songs") if isinstance(body.get("songs"), list) else [], user)
         if path.startswith("/api/songs/") and method == "PATCH":
             return 200, {"song": store.set_bpm(unquote(path[len("/api/songs/"):]), read_json(environ).get("bpm"), user)}
-        if path == "/api/selection" and method == "GET":
-            return 200, {"user": user, "selected": store.selection(user)}
-        if path == "/api/selection" and method == "PUT":
-            return 200, {"user": user, "selected": store.set_selection(user, read_json(environ).get("selected"))}
+        list_name = path[len("/api/"):]
+        if list_name in Store.LISTS and method == "GET":
+            return 200, {"user": user, "selected": store.song_list(list_name, user)}
+        if list_name in Store.LISTS and method == "PUT":
+            return 200, {"user": user, "selected": store.set_song_list(list_name, user, read_json(environ).get("selected"))}
         raise HttpError(404, "Introuvable.")
 
     def application(environ, start_response):

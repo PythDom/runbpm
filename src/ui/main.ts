@@ -12,7 +12,8 @@ import { RunCompanion, type CompanionSnapshot } from './companion';
 import { DEFAULT_DOUBT_THRESHOLD, getDoubtThreshold, isDoubtful, LibraryView, NO_PULSE, setDoubtThreshold } from './libraryView';
 import { importNavidrome } from './navidromeImport';
 import { NavidromePanel } from './navidromePanel';
-import { Selection } from './selection';
+import { Selection, selectionKey } from './selection';
+import { PlayHistory } from './history';
 import { SharedPanel } from './sharedPanel';
 import { relaxFileInputs, setRunActive } from './native';
 import { Pager } from './pager';
@@ -41,13 +42,35 @@ const state: {
   seed: number;
   current?: { plan: RunPlan; playlist: Playlist };
   analysis?: { cancelled: boolean };
-} = { library: loadLibrary(), seed: 1 };
+} = { library: loadLibrary(), seed: loadSeed() };
 let lastExport: { m3u: string; csv: string; json: string } | undefined;
 let companionSignature = '';
 let playerSignature = '';
 let companionSynced = false;
 
 // ---------- Utilitaires ----------
+
+// Graine du tirage des morceaux : gardée d'une ouverture à l'autre (une playlist ne change pas si
+// l'appli redémarre en pleine course), changée par « Autre proposition ».
+const SEED_KEY = 'runbpm.seed';
+function loadSeed(): number {
+  try {
+    const saved = Number(localStorage.getItem(SEED_KEY));
+    if (Number.isInteger(saved) && saved > 0) return saved;
+  } catch {
+    /* préférence indisponible */
+  }
+  return newSeed();
+}
+function newSeed(): number {
+  const seed = 1 + Math.floor(Math.random() * 2 ** 30);
+  try {
+    localStorage.setItem(SEED_KEY, String(seed));
+  } catch {
+    /* graine non enregistrée */
+  }
+  return seed;
+}
 
 function loadLibrary(): Song[] {
   try {
@@ -237,6 +260,14 @@ const selection = new Selection(
   () => state.library,
   (msg) => libraryView.setNote(`Sélection non enregistrée sur le serveur : ${msg}`),
 );
+// Morceaux exclus des playlists (bouton « Exclure ») : même mécanisme, liste séparée.
+const excluded = new Selection(
+  () => state.library,
+  (msg) => libraryView.setNote(`Exclusions non enregistrées sur le serveur : ${msg}`),
+  'excluded',
+);
+// Morceaux écoutés pendant les courses : moins souvent proposés pendant deux semaines.
+const history = new PlayHistory();
 /** Base partagée du serveur RunBPM, quand il en sert une et que Navidrome est connecté. */
 let shared: SharedDb | undefined;
 
@@ -301,7 +332,7 @@ const libraryView = new LibraryView($('library-view'), () => state.library, sele
   if (!edit.selection) saveLibrary();
   renderLibrarySummary();
   update();
-}, hideDoubtful);
+}, hideDoubtful, excluded);
 
 function renderLibrarySummary(): void {
   showThreshold();
@@ -473,6 +504,7 @@ async function syncShared(): Promise<void> {
   const db = sharedPanel.db();
   shared = undefined;
   selection.detach();
+  excluded.detach();
   if (!db) return;
   if (!client) {
     sharedPanel.setInfo('Connectez-vous à Navidrome pour utiliser la base partagée.');
@@ -487,11 +519,17 @@ async function syncShared(): Promise<void> {
     const sent = merged.toUpload.length ? await db.upsert(merged.toUpload) : undefined;
     shared = db;
     await selection.attach(db);
+    // Un serveur pas encore mis à jour ne connaît pas les exclusions : elles restent sur l'appareil.
+    const excludedNote = await excluded.attach(db).then(
+      () => '',
+      () => ' Exclusions gardées sur cet appareil : mettez à jour le serveur de la base (git pull, puis Reload).',
+    );
     sharedPanel.setInfo(
       `${sent?.total ?? remote.length} morceau(x) mesuré(s)` +
         (merged.received ? ` · ${merged.received} reçu(s)` : '') +
         (merged.toUpload.length ? ` · ${merged.toUpload.length} envoyé(s)` : '') +
-        '. L’import ne mesure que les morceaux absents de la base.',
+        '. L’import ne mesure que les morceaux absents de la base.' +
+        excludedNote,
     );
   } catch (e) {
     sharedPanel.setInfo(`Base partagée indisponible : ${(e as Error).message}`, true);
@@ -675,7 +713,7 @@ for (const id of ['mode', 'base-cadence', 'tolerance', 'stretch', 'half-time', '
 }
 
 $('reroll').addEventListener('click', () => {
-  state.seed += 1;
+  state.seed = newSeed();
   update();
 });
 
@@ -729,6 +767,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
       !notFound.has(s.id) &&
       !(s.confidence !== undefined && s.confidence < NO_PULSE) &&
       !(hideDoubtful() && isDoubtful(s)) &&
+      !excluded.has(s) &&
       (svc !== 'navidrome' || (navidrome.connected && !!s.navidromeId)),
   );
   const doubtfulHidden = hideDoubtful() ? state.library.filter(isDoubtful).length : 0;
@@ -738,6 +777,14 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
       `Les ${doubtfulHidden} morceaux douteux sont masqués : corrigez leur BPM (filtre « À vérifier seulement » de la Bibliothèque) ou décochez « Masquer les morceaux douteux ».`,
     ];
   }
+  // Taille du choix : de quoi comprendre une playlist peu variée.
+  const nExcluded = excluded.count(state.library);
+  const nDoubtful = hideDoubtful() ? state.library.filter((s) => isDoubtful(s) && !excluded.has(s)).length : 0;
+  $('pool-info').innerHTML =
+    `<strong>${library.length}</strong> morceau(x) utilisable(s) sur ${state.library.length}` +
+    (nDoubtful ? ` · ${nDoubtful} douteux masqué(s)` : '') +
+    (nExcluded ? ` · ${nExcluded} exclu(s)` : '') +
+    (history.recentCount ? ` · ${history.recentCount} écouté(s) récemment, proposé(s) en dernier` : '');
   // Morceaux cochés seulement (ignoré tant qu'aucun morceau utilisable n'est coché).
   const onlySelected = $<HTMLInputElement>('only-selected').checked;
   const picked = library.filter((s) => selection.has(s));
@@ -792,6 +839,9 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
     seed: state.seed,
     // Séance fractionnée lue dans RunBPM : chaque bloc a sa musique (morceaux coupés aux changements).
     cutAt: workout && svc === 'navidrome' ? stepBoundaries(plan) : undefined,
+    // Variété d'une sortie à l'autre : les morceaux écoutés récemment passent après les autres.
+    recent: history.weights,
+    keyOf: selectionKey,
   });
 
   showMessages(errors, [...extraWarnings, ...playlist.warnings]);
@@ -833,6 +883,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
         <td class="num">${rate}</td>
         <td class="num strong">${e.effectiveCadence}</td>
         <td class="num">${e.targetCadence}</td>
+        <td><button type="button" class="link danger row-exclude" data-i="${i}" title="Ne plus proposer ce morceau (réintégrable dans la Bibliothèque)" aria-label="Exclure ${esc(e.song.title)}">⊘</button></td>
       </tr>`;
     })
     .join('');
@@ -928,6 +979,7 @@ const SYNC_LABEL: Record<CompanionSnapshot['sync'], string> = {
 
 function renderRun(snap: CompanionSnapshot): void {
   if (service() === 'navidrome') return;
+  if (snap.running && snap.index >= 0) recordPlayed(snap.index);
   setRunActive(snap.running, 'Métronome', $<HTMLInputElement>('keep-awake').checked);
   $('run-help').classList.remove('error-text');
   const current = state.current;
@@ -982,8 +1034,20 @@ function stopOtherMode(): void {
   else player.pause();
 }
 
+/** Note un morceau comme écouté (une fois par passage dans la playlist). */
+let lastRecorded = '';
+function recordPlayed(index: number): void {
+  const entry = state.current?.playlist.entries[index];
+  if (!entry) return;
+  const key = `${companionSignature || playerSignature}|${index}`;
+  if (key === lastRecorded) return;
+  lastRecorded = key;
+  history.record(entry.song);
+}
+
 function renderPlayerRun(snap: PlayerSnapshot): void {
   if (service() !== 'navidrome') return;
+  if (snap.playing) recordPlayed(snap.index);
   setRunActive(snap.playing, 'Musique au tempo de votre cadence', $<HTMLInputElement>('keep-awake').checked);
   const current = state.current;
   const toggle = $('run-toggle');
@@ -1037,6 +1101,16 @@ $('run-next').addEventListener('click', () => (usePlayer() ? player.next() : com
 $('run-prev').addEventListener('click', () => (usePlayer() ? player.previous() : companion.previous()));
 $('run-reset').addEventListener('click', () => (usePlayer() ? player.jump(0) : companion.reset()));
 $('playlist').addEventListener('click', (ev) => {
+  const ex = (ev.target as HTMLElement).closest<HTMLButtonElement>('button.row-exclude');
+  const entry = ex ? state.current?.playlist.entries[Number(ex.dataset.i)] : undefined;
+  if (entry) {
+    // Morceau exclu : la playlist est recalculée sans lui.
+    excluded.set([entry.song], true);
+    renderLibrarySummary();
+    libraryView.render();
+    update();
+    return;
+  }
   const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button.row-play');
   if (!btn) return;
   if (usePlayer()) player.jump(Number(btn.dataset.i));

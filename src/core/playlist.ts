@@ -35,6 +35,13 @@ export interface PlaylistOptions {
    * fractionnée). Seul le lecteur intégré sait couper un morceau ; ailleurs, laisser vide.
    */
   cutAt?: number[];
+  /**
+   * Morceaux écoutés récemment : clé du morceau → poids de 0 à 1 (1 = écouté aujourd'hui). Ils sont
+   * moins souvent choisis, pour varier d'une sortie à l'autre.
+   */
+  recent?: ReadonlyMap<string, number>;
+  /** Clé d'un morceau pour `recent` (par défaut son identifiant). */
+  keyOf?: (song: Song) => string;
 }
 
 /** En deçà, un bout de bloc restant n'a pas son propre morceau : le suivant déborde dessus. */
@@ -157,14 +164,18 @@ export function generatePlaylist(plan: RunPlan, library: Song[], options: Partia
         // Un morceau qui s'arrête juste avant la coupure laisserait un bout de bloc trop court.
         const gap = limit - (t + ev.duration);
         const shortGap = !ev.cut && gap > 0 && gap < MIN_CUT_WINDOW * 2 ? 0.03 : 0;
-        // Coût : écart de tempo, pénalité légère sur le time-stretch et le mi-tempo,
-        // forte pénalité sur les répétitions, bruit pour varier entre morceaux équivalents.
+        // Coût : un morceau dans la tolérance vaut presque n'importe quel autre dans la tolérance
+        // (tirage au sort entre eux, pour la variété) ; au-delà, l'écart compte pleinement.
+        // Pénalités légères : ajustement de vitesse, mi-tempo, écoute récente ; forte : répétition.
+        const fit = ev.error <= opts.tolerance ? ev.error * 0.25 : ev.error;
+        const recent = opts.recent?.get(opts.keyOf ? opts.keyOf(song) : song.id) ?? 0;
         const cost =
-          ev.error +
-          Math.abs(ev.rate - 1) * 0.5 +
+          fit +
+          Math.abs(ev.rate - 1) * 0.15 +
           (m === 2 ? 0.002 : 0) +
           used * 0.05 +
-          random() * opts.tolerance * 0.3 +
+          recent * opts.tolerance * 1.5 +
+          random() * opts.tolerance +
           shortGap;
         candidates.push({ ...ev, cost, repeated: used > 0 });
       }

@@ -1,15 +1,16 @@
 import type { Song } from '../core/library';
 import { safeStorage } from '../services/spotify';
-import type { SharedDb } from '../services/sharedDb';
+import type { SharedDb, SongListName } from '../services/sharedDb';
 
-const KEY = 'runbpm.selection';
+const STORAGE_KEYS: Record<SongListName, string> = { selection: 'runbpm.selection', excluded: 'runbpm.excluded' };
 
 /** Clé de sélection d'un morceau : son identifiant Navidrome s'il en a un (partagé entre appareils). */
 export const selectionKey = (s: Song): string => s.navidromeId ?? s.id;
 
 /**
- * Morceaux cochés « pour courir » par l'utilisateur. Conservés dans ce navigateur et, quand la base
- * partagée est disponible, sur le serveur RunBPM (une sélection par compte Navidrome).
+ * Liste de morceaux de l'utilisateur : cochés « pour courir » (`selection`) ou exclus des playlists
+ * (`excluded`). Conservée dans ce navigateur et, quand la base partagée est disponible, sur le
+ * serveur RunBPM (une liste par utilisateur).
  */
 export class Selection {
   private readonly store = safeStorage(() => localStorage);
@@ -20,10 +21,11 @@ export class Selection {
   constructor(
     private readonly getLibrary: () => Song[],
     private readonly onSyncError: (message: string) => void = () => undefined,
+    private readonly list: SongListName = 'selection',
   ) {
     let saved: string[] = [];
     try {
-      saved = JSON.parse(this.store.getItem(KEY) ?? '[]') as string[];
+      saved = JSON.parse(this.store.getItem(STORAGE_KEYS[list]) ?? '[]') as string[];
     } catch {
       /* sélection illisible : on repart de zéro */
     }
@@ -58,16 +60,18 @@ export class Selection {
    * si elle est vide, la sélection locale y est envoyée.
    */
   async attach(remote: SharedDb | undefined): Promise<void> {
-    this.remote = remote;
+    this.remote = undefined;
     if (!remote) return;
-    const server = await remote.selection();
+    // Le serveur n'est retenu qu'une fois la liste lue (un serveur ancien peut ne pas la connaître).
+    const server = await remote.list(this.list);
+    this.remote = remote;
     // Les morceaux cochés avant leur lien au serveur passent sur la clé Navidrome.
     for (const s of this.getLibrary()) {
       if (s.navidromeId && this.keys.delete(s.id)) this.keys.add(s.navidromeId);
     }
     if (server.length === 0) {
       const local = this.serverKeys();
-      if (local.length) await remote.saveSelection(local);
+      if (local.length) await remote.saveList(this.list, local);
       this.saveLocal();
       return;
     }
@@ -95,7 +99,7 @@ export class Selection {
   }
 
   private saveLocal(): void {
-    this.store.setItem(KEY, JSON.stringify([...this.keys]));
+    this.store.setItem(STORAGE_KEYS[this.list], JSON.stringify([...this.keys]));
   }
 
   private persist(): void {
@@ -105,7 +109,7 @@ export class Selection {
     clearTimeout(this.timer);
     // Seules les clés Navidrome vont au serveur ; les morceaux purement locaux restent ici.
     this.timer = setTimeout(() => {
-      remote.saveSelection(this.serverKeys()).catch((e: Error) => this.onSyncError(e.message));
+      remote.saveList(this.list, this.serverKeys()).catch((e: Error) => this.onSyncError(e.message));
     }, 600);
   }
 }
