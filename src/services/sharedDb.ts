@@ -26,6 +26,9 @@ export interface SharedHealth {
 
 type Fetch = typeof fetch;
 
+/** Listes de morceaux propres à chaque utilisateur. */
+export type SongListName = 'selection' | 'excluded';
+
 export class SharedDbError extends Error {
   constructor(
     message: string,
@@ -141,11 +144,20 @@ export class SharedDb {
   }
 
   async selection(): Promise<string[]> {
-    return (await this.call<{ selected: string[] }>('GET', 'selection')).selected;
+    return this.list('selection');
   }
 
   async saveSelection(ids: string[]): Promise<void> {
-    await this.call('PUT', 'selection', { selected: ids });
+    await this.saveList('selection', ids);
+  }
+
+  /** Liste de morceaux de l'utilisateur : cochés pour courir, ou exclus des playlists. */
+  async list(name: SongListName): Promise<string[]> {
+    return (await this.call<{ selected: string[] }>('GET', name)).selected;
+  }
+
+  async saveList(name: SongListName, ids: string[]): Promise<void> {
+    await this.call('PUT', name, { selected: ids });
   }
 }
 

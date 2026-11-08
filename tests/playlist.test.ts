@@ -90,3 +90,32 @@ describe('exports', () => {
     expect(toTransferCsv(p)).toBe('Track name,Artist name\n"Titre, ""cité""",x\n');
   });
 });
+
+describe('variété', () => {
+  // 60 morceaux tous dans la tolérance d'une course à plat (cadence constante).
+  const flat: Section[] = [{ startDist: 0, endDist: 8000, length: 8000, eleStart: 0, eleEnd: 0, grade: 0 }];
+  const plan = planRun(flat, { targetPace: 330, mode: 'pace', baseCadence: 172 });
+  const lib: Song[] = Array.from({ length: 60 }, (_, i) => ({ id: `v${i}`, title: `V${i}`, artist: 'A', bpm: 170 + (i % 5), duration: 200 }));
+  const ids = (p: ReturnType<typeof generatePlaylist>) => p.entries.map((e) => e.song.id);
+
+  it('tire au sort parmi les morceaux dans la tolérance', () => {
+    const a = ids(generatePlaylist(plan, lib, { seed: 1 }));
+    const b = ids(generatePlaylist(plan, lib, { seed: 2 }));
+    const common = a.filter((id) => b.includes(id)).length;
+    expect(common / a.length).toBeLessThan(0.6);
+    // Les morceaux choisis couvrent largement les tempos disponibles, pas seulement le plus exact.
+    expect(new Set(generatePlaylist(plan, lib, { seed: 1 }).entries.map((e) => e.song.bpm)).size).toBeGreaterThanOrEqual(3);
+  });
+
+  it('évite les morceaux écoutés récemment', () => {
+    const first = ids(generatePlaylist(plan, lib, { seed: 7 }));
+    const recent = new Map(first.map((id) => [id, 1]));
+    const next = ids(generatePlaylist(plan, lib, { seed: 7, recent }));
+    expect(next.filter((id) => recent.has(id)).length).toBe(0);
+  });
+
+  it('garde la tolérance malgré le tirage', () => {
+    const p = generatePlaylist(plan, lib, { seed: 3 });
+    expect(p.matchRatio).toBeGreaterThan(0.97);
+  });
+});

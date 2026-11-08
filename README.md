@@ -125,7 +125,10 @@ puisse remplacer le précédent ; pour une clé privée, fournissez `RUNBPM_KEYS
 - Les MP3 volumineux ne sont décodés que sur une tranche centrale : quelques centaines de ms par fichier.
 - Les fichiers déjà analysés (même chemin, taille, date) sont ignorés lors d’une nouvelle analyse.
 - Le tableau **Bibliothèque** (50 morceaux par page, toute la bibliothèque accessible) permet de
-  rechercher, filtrer les morceaux à vérifier, corriger un BPM (saisie, ×2, ÷2) ou retirer un morceau.
+  rechercher, filtrer les morceaux à vérifier, corriger un BPM (saisie, ×2, ÷2) ou **exclure** un
+  morceau des playlists (bouton ⊘, aussi dans la playlist ; « Réintégrer » et filtre « Exclus
+  seulement » pour revenir en arrière). Les exclusions sont propres à chaque utilisateur et suivent
+  ses appareils via la base partagée.
 
 L’import CSV/JSON reste possible (voir *Formats d’entrée*).
 
@@ -139,9 +142,13 @@ L’import CSV/JSON reste possible (voir *Formats d’entrée*).
      atténué et borné), en conservant l’allure moyenne demandée.
    - Cadence = cadence sur le plat **X** (saisie, calibrée, ou estimée : ≈ 140 + 3 × vitesse en km/h),
      ajustée selon la **tranche de pente** de la section (tableau ci-dessous).
-3. **Choix des morceaux** → on avance dans le temps de course et on choisit à chaque fois le morceau dont
-   le tempo colle le mieux à la cadence cible **sur toute sa durée d’écoute**. Les services de streaming
-   jouent au tempo original : seuls les morceaux déjà au bon BPM (ou à mi-tempo) sont retenus.
+3. **Choix des morceaux** → on avance dans le temps de course et on choisit à chaque fois un morceau dont
+   le tempo colle à la cadence cible **sur toute sa durée d’écoute**. Tous les morceaux dans la
+   tolérance ont leur chance (tirage au sort, pour la variété) ; ceux écoutés pendant les 14 derniers
+   jours passent après les autres. La graine du tirage est gardée : la playlist ne change pas si
+   l’appli redémarre, seulement avec « Autre proposition ». Les services de streaming jouent au tempo
+   original : seuls les morceaux déjà au bon BPM (ou à mi-tempo) sont retenus. Les options de
+   sélection indiquent combien de morceaux sont utilisables (douteux masqués, exclus, écoutés).
 
 ### Séances d’entraînement (fractionné)
 
@@ -257,7 +264,7 @@ serveur avec leur BPM :
   (`runbpm_server.py adduser`) ; le serveur n’en garde que l’empreinte SHA-256.
 
 API (`/api/…`, en-tête `X-RunBPM-Key`) : `health`, `whoami`, `songs` (GET, `?since=` ; POST par lots),
-`songs/<id>` (PATCH du BPM), `selection` (GET, PUT). CORS ouvert : aucune donnée de session n’est
+`songs/<id>` (PATCH du BPM), `selection` et `excluded` (GET, PUT). CORS ouvert : aucune donnée de session n’est
 transmise par cookie.
 
 Sans base partagée, tout fonctionne comme avant : bibliothèque et sélection restent dans l’appareil.

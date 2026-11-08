@@ -53,6 +53,7 @@ export class LibraryView {
   private query = '';
   private onlyDoubtful = false;
   private onlySelected = false;
+  private onlyExcluded = false;
   /** Page affichée (à partir de 0). */
   private page = 0;
   /** Note sous le titre (ex. état de la base partagée). */
@@ -65,12 +66,15 @@ export class LibraryView {
     private readonly onEdit: (edit: LibraryEdit) => void,
     /** Option « Masquer les morceaux douteux » (sauf avec le filtre « À vérifier seulement »). */
     private readonly hideDoubtful: () => boolean = () => false,
+    /** Morceaux exclus des playlists par l'utilisateur. */
+    private readonly excluded?: Selection,
   ) {
     root.addEventListener('input', (ev) => {
       const el = ev.target as HTMLInputElement;
       if (el.id === 'lib-search') this.query = el.value;
       else if (el.id === 'lib-doubtful') this.onlyDoubtful = el.checked;
       else if (el.id === 'lib-selected') this.onlySelected = el.checked;
+      else if (el.id === 'lib-excluded') this.onlyExcluded = el.checked;
       else return;
       this.page = 0;
       this.renderRows();
@@ -107,10 +111,10 @@ export class LibraryView {
       if (!btn || !song) return;
       if (btn.dataset.act === 'x2' && song.bpm * 2 <= 260) this.setBpm(song, song.bpm * 2);
       else if (btn.dataset.act === 'half' && song.bpm / 2 >= 40) this.setBpm(song, song.bpm / 2);
-      else if (btn.dataset.act === 'del') {
-        const lib = this.getLibrary();
-        lib.splice(lib.indexOf(song), 1);
-        this.onEdit({ removed: song });
+      else if (btn.dataset.act === 'exclude' && this.excluded) {
+        // Exclu des playlists (ou réintégré) ; le morceau reste dans la bibliothèque et la base.
+        this.excluded.set([song], !this.excluded.has(song));
+        this.onEdit({ selection: true });
         this.render();
       }
     });
@@ -136,6 +140,7 @@ export class LibraryView {
         <input type="search" id="lib-search" placeholder="Rechercher un titre ou un artiste" value="${esc(this.query)}" />
         <label class="check"><input type="checkbox" id="lib-doubtful" ${this.onlyDoubtful ? 'checked' : ''} /> À vérifier seulement</label>
         <label class="check"><input type="checkbox" id="lib-selected" ${this.onlySelected ? 'checked' : ''} /> Cochés seulement</label>
+        ${this.excluded ? `<label class="check"><input type="checkbox" id="lib-excluded" ${this.onlyExcluded ? 'checked' : ''} /> Exclus seulement</label>` : ''}
       </div>
       <p class="muted small">Cochez les morceaux que vous voulez entendre en courant, puis activez « Morceaux cochés seulement »
         dans les options de sélection.</p>
@@ -159,6 +164,7 @@ export class LibraryView {
       .filter((s) => !q || normalizeName(`${s.artist} ${s.title}`).includes(q))
       .filter((s) => (this.onlyDoubtful ? isDoubtful(s) : !(this.hideDoubtful() && isDoubtful(s))))
       .filter((s) => !this.onlySelected || this.selection.has(s))
+      .filter((s) => !this.onlyExcluded || !!this.excluded?.has(s))
       .sort((a, b) => a.artist.localeCompare(b.artist, 'fr') || a.title.localeCompare(b.title, 'fr'));
   }
 
@@ -174,7 +180,10 @@ export class LibraryView {
     const rows = this.visible();
     const lib = this.getLibrary();
     const count = this.root.querySelector('#lib-sel-count');
-    if (count) count.textContent = `${this.selection.count(lib)} coché(s)`;
+    if (count) {
+      const ex = this.excluded?.count(lib) ?? 0;
+      count.textContent = `${this.selection.count(lib)} coché(s)${ex ? ` · ${ex} exclu(s)` : ''}`;
+    }
     const all = this.root.querySelector<HTMLInputElement>('#lib-sel-all');
     if (all) {
       const n = rows.filter((s) => this.selection.has(s)).length;
@@ -205,7 +214,8 @@ export class LibraryView {
         const source = s.bpmSource ? SOURCE_LABEL[s.bpmSource] : '';
         const conf = s.bpmSource === 'analyse' && s.confidence !== undefined ? ` ${Math.round(s.confidence * 100)} %` : '';
         const tag = `<span class="tag ${doubtful ? 'warn' : ''}" title="${excluded ? 'Pas de pulsation nette : écarté des playlists tant que le BPM n’est pas corrigé' : doubtful ? 'Pulsation peu nette : à vérifier. Masqué et écarté des playlists tant que le BPM n’est pas corrigé, si l’option est active' : ''}">${source}${conf}${excluded ? ' · écarté' : ''}</span>`;
-        return `<tr class="${doubtful ? 'doubtful' : ''}">
+        const isExcluded = !!this.excluded?.has(s);
+        return `<tr class="${doubtful ? 'doubtful' : ''} ${isExcluded ? 'excluded' : ''}">
           <td class="sel-col"><input type="checkbox" class="sel" data-id="${esc(s.id)}" ${this.selection.has(s) ? 'checked' : ''} aria-label="Courir avec ${esc(s.title)}" /></td>
           <td><div class="song-title">${esc(s.title)}</div><div class="muted small">${esc(s.artist)} <span class="src-inline">${tag}</span></div></td>
           <td class="num">${formatDuration(s.duration)}</td>
@@ -214,7 +224,11 @@ export class LibraryView {
           <td class="actions">
             <button type="button" data-act="half" data-id="${esc(s.id)}" title="Diviser le BPM par 2">÷2</button>
             <button type="button" data-act="x2" data-id="${esc(s.id)}" title="Multiplier le BPM par 2">×2</button>
-            <button type="button" data-act="del" data-id="${esc(s.id)}" class="link danger" title="Retirer de la bibliothèque" aria-label="Retirer ${esc(s.title)} de la bibliothèque"><span class="del-label">Retirer</span><span class="del-icon" aria-hidden="true">✕</span></button>
+            ${this.excluded
+              ? `<button type="button" data-act="exclude" data-id="${esc(s.id)}" class="link ${isExcluded ? '' : 'danger'}"
+                  title="${isExcluded ? 'Réintégrer dans les playlists' : 'Ne plus proposer ce morceau dans les playlists'}"
+                  aria-label="${isExcluded ? 'Réintégrer' : 'Exclure'} ${esc(s.title)}"><span class="del-label">${isExcluded ? 'Réintégrer' : 'Exclure'}</span><span class="del-icon" aria-hidden="true">${isExcluded ? '↺' : '⊘'}</span></button>`
+              : ''}
           </td>
         </tr>`;
       })
