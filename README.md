@@ -149,11 +149,15 @@ L’import CSV/JSON reste possible (voir *Formats d’entrée*).
    l’appli redémarre, seulement avec « Autre proposition ». Les services de streaming jouent au tempo
    original : seuls les morceaux déjà au bon BPM (ou à mi-tempo) sont retenus. Les options de
    sélection indiquent combien de morceaux sont utilisables (douteux masqués, exclus, écoutés).
+   Un morceau ne plaît pas ? **Glisser sa ligne** de playlist (ou ⇄) propose un autre morceau à la
+   même place sans changer les autres ; ces échanges sont gardés jusqu’à « Autre proposition ».
 
 ### Séances d’entraînement (fractionné)
 
-Au lieu d’un parcours, l’écran 1 accepte une **séance** copiée-collée depuis COROS, Garmin… (bouton
-« Séance d’entraînement ») :
+Au lieu d’un parcours, l’écran 1 accepte une **séance** (bouton « Séance d’entraînement ») : un
+**lien de partage COROS** (`https://sharepageeu.coros.com/share/training/program/…` ou
+`https://t.coros.com/workout-program?programId=…`), lu directement depuis l’API publique de COROS
+(groupes répétés, durées, distances, plages d’allure), ou un texte copié-collé depuis COROS, Garmin… :
 
 ```
 Warm Up
@@ -176,6 +180,8 @@ Cool Down
   totale annoncée (`44:00 8.31km`) départage les cas douteux.
 - Un bloc sans allure est **estimé** : effort ≈ 25 % plus rapide que l’endurance, récupération ≈ 12 %
   plus lente, marche à 115 pas/min. Toutes les allures sont modifiables dans le tableau.
+- **Cadences par catégorie** (Cible, Rapide, Lent) : préremplies avec ce que la séance donne déjà ;
+  en modifier une adapte tous les blocs de cette catégorie (↺ pour revenir aux valeurs proposées).
 - Cadence de chaque bloc : celle du profil coureur à cette vitesse (calibrage, cadence au plat saisie,
   ou estimation).
 - Avec **Navidrome**, chaque bloc a sa musique : les morceaux sont **coupés aux changements d’allure**
@@ -359,7 +365,8 @@ src/core/          moteur, sans dépendance au DOM (testé)
   export.ts          M3U / CSV / JSON / liste pour transfert (Deezer)
   demo.ts            bibliothèque fictive de démonstration
   slopeRules.ts      tranches de pente → cadence, conseils de course
-  workout.ts         séances d’entraînement : lecture du texte, allures, plan par bloc
+  workout.ts         séances d’entraînement : lecture du texte, allures, cadences, plan par bloc
+  coros.ts           import d’une séance par lien de partage COROS
 src/services/spotify.ts   connexion OAuth PKCE, recherche, création de playlist, état du lecteur
 src/services/subsonic.ts  client Subsonic / Navidrome (jeton, search3, stream, Range, playlists)
 src/services/sharedDb.ts  client de la base partagée, fusion avec la bibliothèque locale

@@ -1412,3 +1412,59 @@ tr.excluded td {
 tr.excluded td.actions {
   opacity: 1;
 }
+
+.workout-defaults {
+  margin-top: 10px;
+}
+
+.workout-defaults p {
+  margin: 0;
+}
+
+.grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* Playlist : glisser une ligne pour échanger le morceau. */
+#playlist tbody tr {
+  touch-action: pan-y;
+  transition: transform 0.15s ease-out;
+}
+
+#playlist tbody tr.swapped td {
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+}
+
+#playlist td.row-actions {
+  white-space: nowrap;
+}
+
+#playlist td.row-actions button {
+  padding: 4px 6px;
+  font-size: 1rem;
+  text-decoration: none;
+}
+
+@media (max-width: 899px) {
+  /* Début, km, ajustement du tempo et cible : place à l'essentiel pour tenir sans défilement. */
+  #playlist th:nth-child(2),
+  #playlist td:nth-child(2),
+  #playlist th:nth-child(3),
+  #playlist td:nth-child(3),
+  #playlist th:nth-child(6),
+  #playlist td:nth-child(6),
+  #playlist th:nth-child(8),
+  #playlist td:nth-child(8) {
+    display: none;
+  }
+  #playlist td:nth-child(4) {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+.workout-defaults input.suggested {
+  color: var(--muted);
+}

@@ -119,3 +119,41 @@ describe('variété', () => {
     expect(p.matchRatio).toBeGreaterThan(0.97);
   });
 });
+
+describe('échange d’un morceau', async () => {
+  const { alternativesFor, replaceEntry } = await import('../src/core/playlist');
+  const flat: Section[] = [{ startDist: 0, endDist: 8000, length: 8000, eleStart: 0, eleEnd: 0, grade: 0 }];
+  const plan = planRun(flat, { targetPace: 330, mode: 'pace', baseCadence: 172 });
+  const lib: Song[] = Array.from({ length: 40 }, (_, i) => ({ id: `s${i}`, title: `S${i}`, artist: 'A', bpm: 168 + (i % 9), duration: 180 + (i % 4) * 30 }));
+
+  it('propose des morceaux absents de la playlist, les mieux adaptés d’abord', () => {
+    const p = generatePlaylist(plan, lib, { seed: 4 });
+    const alts = alternativesFor(plan, p, 2, lib);
+    const inPlaylist = new Set(p.entries.map((e) => e.song.id));
+    expect(alts.length).toBeGreaterThan(5);
+    expect(alts.some((s) => inPlaylist.has(s.id))).toBe(false);
+    expect(Math.abs(alts[0].bpm - 172)).toBeLessThanOrEqual(Math.abs(alts[alts.length - 1].bpm - 172));
+  });
+
+  it('remplace un seul morceau ; les suivants restent les mêmes, décalés si la durée change', () => {
+    const p = generatePlaylist(plan, lib, { seed: 4 });
+    const alt = alternativesFor(plan, p, 1, lib)[0];
+    const q = replaceEntry(plan, p, 1, alt);
+    expect(q.entries[1].song.id).toBe(alt.id);
+    expect(q.entries.map((e) => e.song.id).filter((_, i) => i !== 1)).toEqual(p.entries.map((e) => e.song.id).filter((_, i) => i !== 1));
+    const delta = q.entries[1].endTime - p.entries[1].endTime;
+    expect(q.entries[2].startTime).toBeCloseTo(p.entries[2].startTime + delta, 6);
+    expect(q.entries[0]).toEqual(p.entries[0]);
+  });
+
+  it('morceaux coupés : le remplaçant remplit le même créneau, rien ne bouge', () => {
+    const cutAt = [600, 1200];
+    const p = generatePlaylist(plan, lib, { seed: 4, cutAt });
+    const i = p.entries.findIndex((e) => e.cut);
+    expect(i).toBeGreaterThanOrEqual(0);
+    const alts = alternativesFor(plan, p, i, lib, { cutAt });
+    const q = replaceEntry(plan, p, i, alts[0], { cutAt });
+    expect(q.entries[i].endTime).toBeCloseTo(p.entries[i].endTime, 6);
+    expect(q.entries[i + 1]).toEqual(p.entries[i + 1]);
+  });
+});
