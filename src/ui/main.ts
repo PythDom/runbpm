@@ -3,7 +3,7 @@ import { demoLibrary } from '../core/demo';
 import { toCsv, toJson, toM3U, toTransferText } from '../core/export';
 import { formatDuration, mergeLibraries, parseLibraryFile, type Song } from '../core/library';
 import { cadenceAt, distanceAt, estimateCadence, planRun, type PacingMode, type RunPlan } from '../core/pacing';
-import { generatePlaylist, type Playlist } from '../core/playlist';
+import { alternativesFor, generatePlaylist, replaceEntry, type Playlist, type PlaylistOptions } from '../core/playlist';
 import { parseRouteFile, type Route } from '../core/route';
 import { elevationStats, smoothedProfile, splitSections } from '../core/sections';
 import { analyzeFiles, fileKey } from './analyzer';
@@ -40,7 +40,15 @@ const state: {
   route?: Route;
   library: Song[];
   seed: number;
-  current?: { plan: RunPlan; playlist: Playlist };
+  current?: {
+    plan: RunPlan;
+    playlist: Playlist;
+    /** Playlist tirée avant les échanges de morceaux (morceau d'origine de chaque place). */
+    generated: Playlist;
+    /** Morceaux utilisables et options du tirage, pour proposer des remplaçants. */
+    library: Song[];
+    options: Partial<PlaylistOptions>;
+  };
   analysis?: { cancelled: boolean };
 } = { library: loadLibrary(), seed: loadSeed() };
 let lastExport: { m3u: string; csv: string; json: string } | undefined;
@@ -70,6 +78,27 @@ function newSeed(): number {
     /* graine non enregistrée */
   }
   return seed;
+}
+
+// Morceaux échangés à la main dans la playlist (glisser une ligne) : morceau tiré → remplaçant.
+// Valables pour un tirage (graine) et un plan donnés ; réappliqués quand la playlist est recalculée.
+const SWAPS_KEY = 'runbpm.swaps';
+interface Swaps {
+  key: string;
+  map: Record<string, string>;
+}
+let swaps: Swaps = { key: '', map: {} };
+try {
+  swaps = { ...swaps, ...(JSON.parse(localStorage.getItem(SWAPS_KEY) ?? '{}') as Swaps) };
+} catch {
+  /* échanges illisibles : aucun */
+}
+function saveSwaps(): void {
+  try {
+    localStorage.setItem(SWAPS_KEY, JSON.stringify(swaps));
+  } catch {
+    /* échanges non enregistrés */
+  }
 }
 
 function loadLibrary(): Song[] {
@@ -232,6 +261,7 @@ const workoutPanel = new WorkoutPanel(
     text: $<HTMLTextAreaElement>('workout-text'),
     steps: $('workout-steps'),
     summary: $('workout-summary'),
+    defaults: $('workout-defaults'),
   },
   cadenceForSpeed,
   () => parsePace(paceInput.value) ?? 360,
@@ -820,7 +850,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   // pente homogène, cadence au plat X ajustée par tranche de pente.
   const sections = workout ? [] : splitSections(route!);
   const plan = workout
-    ? workoutPlan(workout, cadenceForSpeed, pace ?? 360)
+    ? workoutPlan(workout, cadenceForSpeed, pace ?? 360, workoutPanel.defaults)
     : planRun(sections, {
         targetPace: pace!,
         mode: $<HTMLSelectElement>('mode').value as PacingMode,
@@ -831,7 +861,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
       });
   // Les applications de streaming jouent au tempo original ; seul le lecteur interne (Navidrome)
   // peut ajuster la vitesse de lecture.
-  const playlist = generatePlaylist(plan, library, {
+  const options: Partial<PlaylistOptions> = {
     tolerance,
     maxStretch: svc === 'navidrome' ? numberInput('stretch', 4) / 100 : 0,
     allowHalfTime: $<HTMLInputElement>('half-time').checked,
@@ -842,11 +872,23 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
     // Variété d'une sortie à l'autre : les morceaux écoutés récemment passent après les autres.
     recent: history.weights,
     keyOf: selectionKey,
+  };
+  const generated = generatePlaylist(plan, library, options);
+  // Échanges faits à la main : seulement pour ce tirage et ce plan.
+  const swapKey = `${state.seed}|${Math.round(plan.totalTime)}|${plan.sections.length}|${svc}`;
+  if (swaps.key !== swapKey) {
+    swaps = { key: swapKey, map: {} };
+    saveSwaps();
+  }
+  let playlist = generated;
+  generated.entries.forEach((e, i) => {
+    const replacement = swaps.map[e.song.id] && library.find((s) => s.id === swaps.map[e.song.id]);
+    if (replacement && !playlist.entries.some((x) => x.song.id === replacement.id)) playlist = replaceEntry(plan, playlist, i, replacement, options);
   });
 
   showMessages(errors, [...extraWarnings, ...playlist.warnings]);
   showResults(true);
-  state.current = { plan, playlist };
+  state.current = { plan, playlist, generated, library, options };
 
   const cadences = plan.sections.map((s) => s.cadence);
   const { gain } = elevationStats(sections);
@@ -874,7 +916,8 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
         isDoubtful(e.song) ? '<span class="tag warn" title="BPM détecté avec une confiance faible">à vérifier</span>' : '',
         e.repeated ? '<span class="tag">bis</span>' : '',
       ].join(' ');
-      return `<tr class="${ok ? '' : 'off'}" data-i="${i}">
+      const swapped = swaps.map[state.current!.generated.entries[i]?.song.id ?? ''] === e.song.id;
+      return `<tr class="${ok ? '' : 'off'} ${swapped ? 'swapped' : ''}" data-i="${i}">
         <td><button type="button" class="row-play" data-i="${i}" aria-label="Aller au morceau ${i + 1}" title="${svc === 'navidrome' ? 'Lire à partir de ce morceau' : 'Recaler le métronome sur ce morceau'}">${i + 1}</button></td>
         <td>${formatDuration(e.startTime)}</td>
         <td>${km(distanceAt(plan, e.startTime), 1)}</td>
@@ -883,7 +926,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
         <td class="num">${rate}</td>
         <td class="num strong">${e.effectiveCadence}</td>
         <td class="num">${e.targetCadence}</td>
-        <td><button type="button" class="link danger row-exclude" data-i="${i}" title="Ne plus proposer ce morceau (réintégrable dans la Bibliothèque)" aria-label="Exclure ${esc(e.song.title)}">⊘</button></td>
+        <td class="row-actions"><button type="button" class="link row-swap" data-i="${i}" title="Un autre morceau à cette place (ou glisser la ligne)" aria-label="Autre morceau à la place de ${esc(e.song.title)}">⇄</button><button type="button" class="link danger row-exclude" data-i="${i}" title="Ne plus proposer ce morceau (réintégrable dans la Bibliothèque)" aria-label="Exclure ${esc(e.song.title)}">⊘</button></td>
       </tr>`;
     })
     .join('');
@@ -1100,7 +1143,69 @@ $('run-toggle').addEventListener('click', () => (usePlayer() ? player.toggle() :
 $('run-next').addEventListener('click', () => (usePlayer() ? player.next() : companion.next()));
 $('run-prev').addEventListener('click', () => (usePlayer() ? player.previous() : companion.previous()));
 $('run-reset').addEventListener('click', () => (usePlayer() ? player.jump(0) : companion.reset()));
+/**
+ * Propose un autre morceau à la place `i` (dir +1 : suivant, -1 : précédent) : on parcourt le morceau
+ * tiré au départ puis ses remplaçants, du mieux adapté au moins adapté ; les autres places ne changent pas.
+ */
+function swapSong(i: number, dir: 1 | -1): void {
+  const cur = state.current;
+  const original = cur?.generated.entries[i]?.song;
+  if (!cur || !original) return;
+  const current = cur.playlist.entries[i].song;
+  const alts = alternativesFor(cur.plan, cur.playlist, i, cur.library, cur.options).filter((s) => s.id !== original.id);
+  const cycle = [original, ...(current.id !== original.id && !alts.some((s) => s.id === current.id) ? [current] : []), ...alts];
+  if (cycle.length < 2) {
+    showMessages([], ['Aucun autre morceau ne convient à cette place.']);
+    return;
+  }
+  const p = cycle.findIndex((s) => s.id === current.id);
+  const next = cycle[(p + dir + cycle.length) % cycle.length];
+  if (next.id === original.id) delete swaps.map[original.id];
+  else swaps.map[original.id] = next.id;
+  saveSwaps();
+  update();
+}
+
+// Glisser une ligne de la playlist vers la gauche ou la droite : autre morceau à cette place.
+{
+  const tbody = $('playlist').querySelector('tbody')!;
+  let start: { x: number; y: number; row: HTMLTableRowElement; id: number } | undefined;
+  let dragging = false;
+  tbody.addEventListener('pointerdown', (ev) => {
+    const row = (ev.target as HTMLElement).closest<HTMLTableRowElement>('tr[data-i]');
+    if (!row || (ev.target as HTMLElement).closest('button, a, input')) return;
+    start = { x: ev.clientX, y: ev.clientY, row, id: ev.pointerId };
+    dragging = false;
+  });
+  tbody.addEventListener('pointermove', (ev) => {
+    if (!start || ev.pointerId !== start.id) return;
+    const dx = ev.clientX - start.x;
+    const dy = ev.clientY - start.y;
+    if (!dragging && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      dragging = true;
+      start.row.setPointerCapture(ev.pointerId);
+    }
+    if (dragging) start.row.style.transform = `translateX(${Math.max(-120, Math.min(120, dx))}px)`;
+  });
+  const end = (ev: PointerEvent) => {
+    if (!start || ev.pointerId !== start.id) return;
+    const dx = ev.clientX - start.x;
+    const row = start.row;
+    row.style.transform = '';
+    start = undefined;
+    if (dragging && Math.abs(dx) > 70) swapSong(Number(row.dataset.i), dx < 0 ? 1 : -1);
+    dragging = false;
+  };
+  tbody.addEventListener('pointerup', end);
+  tbody.addEventListener('pointercancel', end);
+}
+
 $('playlist').addEventListener('click', (ev) => {
+  const sw = (ev.target as HTMLElement).closest<HTMLButtonElement>('button.row-swap');
+  if (sw) {
+    swapSong(Number(sw.dataset.i), 1);
+    return;
+  }
   const ex = (ev.target as HTMLElement).closest<HTMLButtonElement>('button.row-exclude');
   const entry = ex ? state.current?.playlist.entries[Number(ex.dataset.i)] : undefined;
   if (entry) {

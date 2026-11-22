@@ -238,3 +238,112 @@ export function generatePlaylist(plan: RunPlan, library: Song[], options: Partia
 
   return { entries, totalDuration: covered, matchRatio, warnings };
 }
+
+// ---------- Échange d'un morceau de la playlist ----------
+
+/** Fin imposée du morceau `index` : la fin du créneau si les morceaux peuvent être coupés, sinon aucune. */
+function slotLimit(entry: PlaylistEntry, opts: PlaylistOptions): number {
+  return opts.cutAt?.length ? entry.endTime : Infinity;
+}
+
+/** Meilleure façon de jouer `song` à partir de `t` (tempo normal ou mi-tempo). */
+function bestFit(plan: RunPlan, t: number, song: Song, opts: PlaylistOptions, limit: number) {
+  const multipliers: (1 | 2)[] = opts.allowHalfTime ? [1, 2] : [1];
+  return multipliers
+    .map((m) => evaluate(plan, t, song, m, opts, limit))
+    .sort((a, b) => a.error + Math.abs(a.rate - 1) * 0.15 - (b.error + Math.abs(b.rate - 1) * 0.15))[0];
+}
+
+/**
+ * Morceaux pouvant remplacer le morceau `index`, du mieux adapté au moins adapté : ceux qui ne sont
+ * pas déjà ailleurs dans la playlist, dans la tolérance de préférence, les moins écoutés récemment
+ * d'abord. Quand les morceaux peuvent être coupés, seuls ceux assez longs pour remplir le créneau
+ * conviennent.
+ */
+export function alternativesFor(
+  plan: RunPlan,
+  playlist: Playlist,
+  index: number,
+  library: Song[],
+  options: Partial<PlaylistOptions> = {},
+  max = 40,
+): Song[] {
+  const opts: PlaylistOptions = { ...DEFAULT_PLAYLIST_OPTIONS, ...options };
+  const entry = playlist.entries[index];
+  if (!entry) return [];
+  const used = new Set(playlist.entries.filter((_, i) => i !== index).map((e) => e.song.id));
+  const limit = slotLimit(entry, opts);
+  const slot = entry.endTime - entry.startTime;
+  const ranked: { song: Song; score: number }[] = [];
+  for (const song of library) {
+    if (used.has(song.id) || song.id === entry.song.id) continue;
+    const fit = bestFit(plan, entry.startTime, song, opts, limit);
+    if (Number.isFinite(limit) && fit.duration < slot - 1) continue; // ne remplirait pas le créneau
+    const recent = opts.recent?.get(opts.keyOf ? opts.keyOf(song) : song.id) ?? 0;
+    const score = (fit.error <= opts.tolerance ? fit.error * 0.25 : fit.error) + Math.abs(fit.rate - 1) * 0.15 + recent * opts.tolerance * 1.5;
+    ranked.push({ song, score });
+  }
+  return ranked
+    .sort((a, b) => a.score - b.score)
+    .slice(0, max)
+    .map((r) => r.song);
+}
+
+/**
+ * Remplace le morceau `index` par `song` sans toucher aux autres. Si les morceaux peuvent être
+ * coupés (séance avec le lecteur intégré), le remplaçant s'arrête à la même fin de créneau ; sinon
+ * les morceaux suivants sont décalés de la différence de durée.
+ */
+export function replaceEntry(plan: RunPlan, playlist: Playlist, index: number, song: Song, options: Partial<PlaylistOptions> = {}): Playlist {
+  const opts: PlaylistOptions = { ...DEFAULT_PLAYLIST_OPTIONS, ...options };
+  const old = playlist.entries[index];
+  if (!old) return playlist;
+  const t = old.startTime;
+  const fit = bestFit(plan, t, song, opts, slotLimit(old, opts));
+  const fresh: PlaylistEntry = {
+    song,
+    startTime: t,
+    endTime: t + fit.duration,
+    targetCadence: Math.round(averageOver(plan, t, t + fit.duration, (c) => c)),
+    multiplier: fit.multiplier,
+    playbackRate: Math.round(fit.rate * 1000) / 1000,
+    effectiveCadence: Math.round(song.bpm * fit.multiplier * fit.rate * 10) / 10,
+    error: fit.error,
+    repeated: false,
+    ...(fit.cut ? { cut: true, songStart: songStartFor(song.duration, fit.duration * fit.rate) } : {}),
+  };
+  const delta = fresh.endTime - old.endTime;
+  const entries = playlist.entries.map((e, i) => {
+    if (i === index) return fresh;
+    if (i < index || Math.abs(delta) < 1e-6) return e;
+    // Même morceau, décalé : on recalcule la cadence visée et l'écart à son nouvel horaire.
+    const startTime = e.startTime + delta;
+    const endTime = e.endTime + delta;
+    return {
+      ...e,
+      startTime,
+      endTime,
+      targetCadence: Math.round(averageOver(plan, startTime, endTime, (c) => c)),
+      error: averageOver(plan, startTime, endTime, (c) => Math.abs(e.effectiveCadence - c) / c),
+    };
+  });
+  return { ...summarize(plan, entries, opts), warnings: playlist.warnings };
+}
+
+/** Durée couverte et part du temps de course dans la tolérance. */
+function summarize(plan: RunPlan, entries: PlaylistEntry[], opts: PlaylistOptions): Omit<Playlist, 'warnings'> {
+  let matched = 0;
+  let samples = 0;
+  for (let time = 0; time < plan.totalTime; time += 5) {
+    samples++;
+    const e = entries.find((x) => time >= x.startTime && time < x.endTime);
+    if (!e) continue;
+    const c = cadenceAt(plan, time);
+    if (Math.abs(e.effectiveCadence - c) / c <= opts.tolerance + 1e-9) matched++;
+  }
+  return {
+    entries,
+    totalDuration: entries.length ? entries[entries.length - 1].endTime : 0,
+    matchRatio: samples ? matched / samples : 0,
+  };
+}

@@ -33,11 +33,21 @@
               <div id="route-summary" class="summary muted">Aucun parcours chargé.</div>
             </div>
             <div id="workout-panel" hidden>
-              <label>Séance (copiée depuis COROS, Garmin…)
+              <label>Séance : lien de partage COROS, ou texte copié (COROS, Garmin…)
                 <textarea id="workout-text" rows="7" spellcheck="false"
-                  placeholder="Nom du bloc, durée (04:00) ou distance (1.00 km), allure (Pace | 4'30''-5'10''), « Repeat 4 Times »…"></textarea>
+                  placeholder="https://sharepageeu.coros.com/share/training/program/…&#10;ou : nom du bloc, durée (04:00) ou distance (1.00 km), allure (Pace | 4'30''-5'10''), « Repeat 4 Times »…"></textarea>
               </label>
               <div class="row"><button type="button" class="link" id="workout-sample">Exemple : 4 × 4 min / 3 min</button></div>
+              <div id="workout-defaults" class="workout-defaults">
+                <p class="small muted">Cadences (pas/min) proposées d’après la séance et votre profil : modifiez-en une pour
+                  adapter tous les blocs de cette catégorie.
+                  <button type="button" class="link" id="workout-defaults-reset" hidden>↺ Valeurs proposées</button></p>
+                <div class="grid3">
+                  <label>Cible<input type="number" data-default="easy" min="100" max="220" step="1" inputmode="numeric" /></label>
+                  <label>Rapide<input type="number" data-default="fast" min="100" max="220" step="1" inputmode="numeric" /></label>
+                  <label>Lent<input type="number" data-default="slow" min="100" max="220" step="1" inputmode="numeric" /></label>
+                </div>
+              </div>
               <div id="workout-summary" class="summary muted">Aucune séance.</div>
               <div id="workout-steps"></div>
             </div>
@@ -206,6 +216,7 @@
             </div>
           </div>
           <p id="service-status" class="small" hidden></p>
+            <p class="small muted">Un morceau ne vous plaît pas ? Glissez sa ligne vers la gauche ou la droite (ou ⇄) pour un autre à la même place ; ⊘ l’exclut des playlists.</p>
           <div class="table-wrap">
             <table id="playlist">
               <thead>

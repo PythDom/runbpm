@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { estimateCadence } from '../src/core/pacing';
-import { parsePaceInput, parseWorkout, resolveSteps, stepBoundaries, totalTime, workoutPlan } from '../src/core/workout';
+import { parsePaceInput, parseWorkout, resolveSteps, stepBoundaries, suggestedCadences, totalTime, workoutPlan } from '../src/core/workout';
 
 const FRACTIONNE = `4x 4min/3min
 44:00 8.31km 131TL
@@ -133,5 +133,34 @@ describe('playlist d’une séance', () => {
       expect(e).toMatchObject({ cut: true, songStart: 60, effectiveCadence: s.cadence });
     }
     expect(plain.entries.some((e) => e.cut)).toBe(false);
+  });
+});
+
+describe('cadences par catégorie', () => {
+  it('une cadence fixée s’applique à tous les blocs de sa catégorie', () => {
+    const plan = workoutPlan(parseWorkout(BRULURE), estimateCadence, undefined, { fast: 186, slow: 158, easy: 170 });
+    const by = (label: string) => plan.sections.find((s) => s.label?.startsWith(label))!;
+    expect(by('Rapide').cadence).toBe(186);
+    expect(by('Lent').cadence).toBe(158);
+    expect(by('EF').cadence).toBe(170);
+  });
+
+  it('une catégorie non fixée garde la cadence du coureur à l’allure du bloc', () => {
+    const plan = workoutPlan(parseWorkout(BRULURE), estimateCadence, undefined, { fast: 186 });
+    const lent = plan.sections.find((s) => s.label?.startsWith('Lent'))!;
+    expect(lent.cadence).toBe(estimateCadence(3600 / lent.pace));
+  });
+
+  it('valeurs proposées : moyenne de ce que la séance donne déjà par catégorie', () => {
+    const w = parseWorkout(FRACTIONNE);
+    const sug = suggestedCadences(w, estimateCadence);
+    const cad = (pace: number) => estimateCadence(3600 / pace);
+    // Cible = échauffement (6:00) et retour au calme (5:30) ; rapide = Training (4:50) ; lent = Rest (5:30).
+    expect(sug).toEqual({ easy: Math.round((cad(360) + cad(330)) / 2), fast: cad(290), slow: cad(330) });
+    expect(sug.fast).toBeGreaterThan(sug.easy);
+    // Catégorie absente : estimation à partir de l'endurance.
+    const onlyEasy = suggestedCadences(parseWorkout('EF\n30:00\nPace | 6\'00\'\''), estimateCadence);
+    expect(onlyEasy.fast).toBeGreaterThan(onlyEasy.easy);
+    expect(onlyEasy.slow).toBeLessThan(onlyEasy.easy);
   });
 });
