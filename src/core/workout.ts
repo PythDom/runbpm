@@ -42,7 +42,7 @@ export interface ResolvedStep {
   label: string;
   /** Allure retenue (s/km) et sa provenance. */
   pace: number;
-  paceSource: 'plage' | 'estimée' | 'saisie';
+  paceSource: 'plage' | 'estimée' | 'saisie' | 'catégorie';
   duration: number;
   distance: number;
 }
@@ -207,12 +207,30 @@ const rangeMid = (s: WorkoutStep) => (s.paceLow !== undefined && s.paceHigh !== 
 export const WALK_PACE = 600;
 export const WALK_CADENCE = 115;
 
+/** Allures (s/km) choisies par l'utilisateur, par catégorie de bloc. */
+export interface CategoryPaces {
+  /** Blocs d'endurance, échauffement, retour au calme… */
+  easy?: number;
+  /** Efforts (rapide, VMA, sprint…). */
+  fast?: number;
+  /** Récupérations. */
+  slow?: number;
+}
+
+export type PaceCategory = keyof CategoryPaces;
+
+export function paceCategory(kind: StepKind): PaceCategory {
+  return kind === 'fast' ? 'fast' : kind === 'recovery' || kind === 'walk' ? 'slow' : 'easy';
+}
+
 /**
- * Déroule les répétitions et fixe l'allure de chaque bloc : saisie, sinon milieu de la plage
- * indiquée, sinon estimée d'après les autres blocs (un effort sans allure : nettement plus vite que
- * l'endurance ; une récupération : un peu plus lent).
+ * Déroule les répétitions et fixe l'allure de chaque bloc : saisie pour ce bloc ; sinon celle que
+ * l'utilisateur a choisie pour sa catégorie ; sinon le milieu de la plage indiquée par la séance ;
+ * sinon l'allure proposée pour sa catégorie (`fill`, ex. allures habituelles du coureur) ; sinon
+ * estimée d'après les autres blocs (un effort sans allure : nettement plus vite que l'endurance ;
+ * une récupération : un peu plus lent). La marche garde son allure de marche.
  */
-export function resolveSteps(workout: Workout, fallbackPace = 360): ResolvedStep[] {
+export function resolveSteps(workout: Workout, fallbackPace = 360, categories?: CategoryPaces, fill?: CategoryPaces): ResolvedStep[] {
   const all = workout.blocks.flatMap((b) => b.steps);
   const known = (kinds: StepKind[]) => all.filter((s) => kinds.includes(s.kind)).map((s) => s.paceOverride ?? rangeMid(s)).filter((p): p is number => p !== undefined);
   const calm = known(['easy', 'warmup', 'cooldown', 'recovery', 'other']);
@@ -223,8 +241,12 @@ export function resolveSteps(workout: Workout, fallbackPace = 360): ResolvedStep
 
   const paceOf = (s: WorkoutStep): [number, ResolvedStep['paceSource']] => {
     if (s.paceOverride) return [s.paceOverride, 'saisie'];
+    const chosen = s.kind === 'walk' ? undefined : categories?.[paceCategory(s.kind)];
+    if (chosen) return [chosen, 'catégorie'];
     const mid = rangeMid(s);
     if (mid !== undefined) return [mid, 'plage'];
+    const proposed = s.kind === 'walk' ? undefined : fill?.[paceCategory(s.kind)];
+    if (proposed) return [proposed, 'estimée'];
     switch (s.kind) {
       case 'fast':
         return [fastKnown.length ? mean(fastKnown) : easyRef * 0.75, 'estimée'];
@@ -259,68 +281,71 @@ export function resolveSteps(workout: Workout, fallbackPace = 360): ResolvedStep
   return out;
 }
 
-export function totalTime(workout: Workout, fallbackPace?: number): number {
-  return resolveSteps(workout, fallbackPace).reduce((a, s) => a + s.duration, 0);
+export function totalTime(workout: Workout, fallbackPace?: number, categories?: CategoryPaces, fill?: CategoryPaces): number {
+  return resolveSteps(workout, fallbackPace, categories, fill).reduce((a, s) => a + s.duration, 0);
 }
 
-/** Cadences (pas/min) choisies par l'utilisateur, par catégorie de bloc. */
-export interface DefaultCadences {
-  /** Blocs d'endurance, échauffement, retour au calme… */
-  easy?: number;
-  /** Efforts (rapide, VMA, sprint…). */
-  fast?: number;
-  /** Récupérations et marche. */
-  slow?: number;
+/** Cadence d'un bloc : celle du coureur à l'allure retenue (marche : cadence de marche). */
+export function stepCadence(s: ResolvedStep, cadenceFor: (speedKmh: number) => number): number {
+  if (s.step.kind === 'walk') return WALK_CADENCE;
+  return Math.round(cadenceFor(3.6 * (1000 / s.pace)));
 }
 
-export type CadenceCategory = keyof DefaultCadences;
-
-export function cadenceCategory(kind: StepKind): CadenceCategory {
-  return kind === 'fast' ? 'fast' : kind === 'recovery' || kind === 'walk' ? 'slow' : 'easy';
+/** Tronçons de sorties enregistrées (calibrage) : vitesse et durée. */
+export interface PaceSample {
+  speedKmh: number;
+  weight: number;
 }
 
 /**
- * Cadence d'un bloc : celle que l'utilisateur a fixée pour sa catégorie, s'il l'a fait ; sinon celle
- * du coureur à l'allure retenue (marche : cadence fixe).
+ * Allures habituelles du coureur d'après ses sorties enregistrées : cible = allure la plus
+ * pratiquée (médiane au temps passé) ; rapide = ses 10 % de tronçons les plus rapides ; lent = ses
+ * 10 % les plus lents. Undefined s'il y a trop peu de données.
  */
-export function stepCadence(s: ResolvedStep, cadenceFor: (speedKmh: number) => number, defaults?: DefaultCadences): { cadence: number; fromDefault: boolean } {
-  const preset = defaults?.[cadenceCategory(s.step.kind)];
-  if (preset) return { cadence: Math.round(preset), fromDefault: true };
-  if (s.step.kind === 'walk') return { cadence: WALK_CADENCE, fromDefault: false };
-  return { cadence: Math.round(cadenceFor(3.6 * (1000 / s.pace))), fromDefault: false };
+export function paceStats(samples: PaceSample[]): Required<CategoryPaces> | undefined {
+  const valid = samples.filter((s) => s.speedKmh > 4 && s.weight > 0);
+  if (valid.length < 5) return undefined;
+  const paces = valid.map((s) => ({ pace: 3600 / s.speedKmh, w: s.weight })).sort((a, b) => a.pace - b.pace);
+  const total = paces.reduce((a, p) => a + p.w, 0);
+  let acc = 0;
+  const median = paces.find((p) => (acc += p.w) >= total / 2)!.pace;
+  const at = (q: number) => paces[Math.min(paces.length - 1, Math.max(0, Math.round(q * (paces.length - 1))))].pace;
+  return { easy: Math.round(median), fast: Math.round(at(0.1)), slow: Math.round(at(0.9)) };
 }
 
 /**
- * Cadences proposées par catégorie : celles que la séance donne déjà (moyenne de ses blocs de la
- * catégorie, d'après l'allure et le profil du coureur) ; pour une catégorie absente, une estimation
- * (effort ≈ 25 % plus rapide que l'endurance, récupération ≈ 12 % plus lente).
+ * Allures proposées par catégorie : celles que la séance indique (moyenne de ses blocs de la
+ * catégorie) ; pour une catégorie sans allure dans la séance, les allures habituelles du coureur
+ * (sorties importées) ; à défaut, une estimation (effort ≈ 25 % plus rapide que l'endurance,
+ * récupération ≈ 12 % plus lente).
  */
-export function suggestedCadences(workout: Workout | undefined, cadenceFor: (speedKmh: number) => number, fallbackPace = 360): Required<DefaultCadences> {
-  const steps = workout ? resolveSteps(workout, fallbackPace) : [];
-  const out = {} as Required<DefaultCadences>;
-  const easyPaces = steps.filter((s) => cadenceCategory(s.step.kind) === 'easy').map((s) => s.pace);
-  const easyRef = easyPaces.length ? mean(easyPaces) : fallbackPace;
-  const atPace = (pace: number) => Math.round(cadenceFor(3600 / pace));
-  const fallback: Required<DefaultCadences> = { easy: atPace(easyRef), fast: atPace(easyRef * 0.75), slow: atPace(easyRef * 1.12) };
-  for (const cat of ['easy', 'fast', 'slow'] as CadenceCategory[]) {
-    const cads = steps.filter((s) => cadenceCategory(s.step.kind) === cat).map((s) => stepCadence(s, cadenceFor).cadence);
-    out[cat] = cads.length ? Math.round(mean(cads)) : fallback[cat];
-  }
-  return out;
+export function suggestedPaces(workout: Workout | undefined, fallbackPace = 360, history?: Required<CategoryPaces>): Required<CategoryPaces> {
+  const steps = workout ? workout.blocks.flatMap((b) => b.steps) : [];
+  const fromWorkout = (cat: PaceCategory) => {
+    const paces = steps.filter((s) => s.kind !== 'walk' && paceCategory(s.kind) === cat).map(rangeMid).filter((p): p is number => p !== undefined);
+    return paces.length ? Math.round(mean(paces)) : undefined;
+  };
+  const easy = fromWorkout('easy') ?? history?.easy ?? fallbackPace;
+  return {
+    easy,
+    fast: fromWorkout('fast') ?? history?.fast ?? Math.round(easy * 0.75),
+    slow: fromWorkout('slow') ?? history?.slow ?? Math.round(easy * 1.12),
+  };
 }
 
 /**
- * Plan de course de la séance : une section par bloc, à plat, avec la cadence donnée par
- * `cadenceFor(vitesse en km/h)` (calibrage du coureur ou estimation), ou par la cadence fixée par
- * l'utilisateur pour la catégorie du bloc. Marche : cadence fixe.
+ * Plan de course de la séance : une section par bloc, à plat, à l'allure retenue pour le bloc et
+ * avec la cadence du coureur à cette allure (`cadenceFor(vitesse en km/h)` : calibrage ou
+ * estimation). Marche : cadence fixe.
  */
 export function workoutPlan(
   workout: Workout,
   cadenceFor: (speedKmh: number) => number,
   fallbackPace?: number,
-  defaults?: DefaultCadences,
+  categories?: CategoryPaces,
+  fill?: CategoryPaces,
 ): RunPlan {
-  const steps = resolveSteps(workout, fallbackPace);
+  const steps = resolveSteps(workout, fallbackPace, categories, fill);
   const sections: PlannedSection[] = [];
   let t = 0;
   let d = 0;
@@ -335,7 +360,7 @@ export function workoutPlan(
       grade: 0,
       speed,
       pace: s.pace,
-      cadence: stepCadence(s, cadenceFor, defaults).cadence,
+      cadence: stepCadence(s, cadenceFor),
       label: s.label,
       startTime: t,
       endTime: t + s.duration,

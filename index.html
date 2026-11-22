@@ -39,13 +39,18 @@
               </label>
               <div class="row"><button type="button" class="link" id="workout-sample">Exemple : 4 × 4 min / 3 min</button></div>
               <div id="workout-defaults" class="workout-defaults">
-                <p class="small muted">Cadences (pas/min) proposées d’après la séance et votre profil : modifiez-en une pour
-                  adapter tous les blocs de cette catégorie.
+                <p class="small muted">Allures (min/km) proposées d’après la séance, sinon vos sorties : modifiez-en une pour
+                  adapter tous les blocs de cette catégorie ; la cadence suit votre profil.
                   <button type="button" class="link" id="workout-defaults-reset" hidden>↺ Valeurs proposées</button></p>
+                <label class="file compact">
+                  <input type="file" id="workout-calib-files" accept=".csv,.fit,.tcx" multiple />
+                  <span>Affiner allure → cadence avec vos sorties (CSV des tours COROS, FIT, TCX)</span>
+                </label>
+                <p id="workout-calib-info" class="small muted"></p>
                 <div class="grid3">
-                  <label>Cible<input type="number" data-default="easy" min="100" max="220" step="1" inputmode="numeric" /></label>
-                  <label>Rapide<input type="number" data-default="fast" min="100" max="220" step="1" inputmode="numeric" /></label>
-                  <label>Lent<input type="number" data-default="slow" min="100" max="220" step="1" inputmode="numeric" /></label>
+                  <label>Cible<input type="text" data-default="easy" inputmode="decimal" spellcheck="false" /><span class="small muted" data-cadence="easy"></span></label>
+                  <label>Rapide<input type="text" data-default="fast" inputmode="decimal" spellcheck="false" /><span class="small muted" data-cadence="fast"></span></label>
+                  <label>Lent<input type="text" data-default="slow" inputmode="decimal" spellcheck="false" /><span class="small muted" data-cadence="slow"></span></label>
                 </div>
               </div>
               <div id="workout-summary" class="summary muted">Aucune séance.</div>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { estimateCadence } from '../src/core/pacing';
-import { parsePaceInput, parseWorkout, resolveSteps, stepBoundaries, suggestedCadences, totalTime, workoutPlan } from '../src/core/workout';
+import { paceStats, parsePaceInput, parseWorkout, resolveSteps, stepBoundaries, suggestedPaces, totalTime, workoutPlan } from '../src/core/workout';
 
 const FRACTIONNE = `4x 4min/3min
 44:00 8.31km 131TL
@@ -136,31 +136,46 @@ describe('playlist d’une séance', () => {
   });
 });
 
-describe('cadences par catégorie', () => {
-  it('une cadence fixée s’applique à tous les blocs de sa catégorie', () => {
-    const plan = workoutPlan(parseWorkout(BRULURE), estimateCadence, undefined, { fast: 186, slow: 158, easy: 170 });
+describe('allures par catégorie', () => {
+  it('une allure choisie s’applique à tous les blocs de sa catégorie ; la cadence suit le profil', () => {
+    const plan = workoutPlan(parseWorkout(BRULURE), estimateCadence, undefined, { fast: 240, slow: 420, easy: 375 });
     const by = (label: string) => plan.sections.find((s) => s.label?.startsWith(label))!;
-    expect(by('Rapide').cadence).toBe(186);
-    expect(by('Lent').cadence).toBe(158);
-    expect(by('EF').cadence).toBe(170);
+    expect(by('Rapide')).toMatchObject({ pace: 240, cadence: estimateCadence(15) });
+    expect(by('Lent').pace).toBe(420);
+    expect(by('EF').pace).toBe(375); // même si la séance indique une plage pour EF
+    expect(resolveSteps(parseWorkout(BRULURE), 360, { fast: 240 }).find((s) => s.step.name === 'Rapide')!.paceSource).toBe('catégorie');
   });
 
-  it('une catégorie non fixée garde la cadence du coureur à l’allure du bloc', () => {
-    const plan = workoutPlan(parseWorkout(BRULURE), estimateCadence, undefined, { fast: 186 });
-    const lent = plan.sections.find((s) => s.label?.startsWith('Lent'))!;
-    expect(lent.cadence).toBe(estimateCadence(3600 / lent.pace));
+  it('une allure saisie pour un bloc l’emporte sur celle de sa catégorie', () => {
+    const w = parseWorkout(BRULURE);
+    w.blocks[1].steps[0].paceOverride = 255;
+    expect(resolveSteps(w, 360, { fast: 240 }).find((s) => s.step.name === 'Rapide')).toMatchObject({ pace: 255, paceSource: 'saisie' });
   });
 
-  it('valeurs proposées : moyenne de ce que la séance donne déjà par catégorie', () => {
-    const w = parseWorkout(FRACTIONNE);
-    const sug = suggestedCadences(w, estimateCadence);
-    const cad = (pace: number) => estimateCadence(3600 / pace);
-    // Cible = échauffement (6:00) et retour au calme (5:30) ; rapide = Training (4:50) ; lent = Rest (5:30).
-    expect(sug).toEqual({ easy: Math.round((cad(360) + cad(330)) / 2), fast: cad(290), slow: cad(330) });
-    expect(sug.fast).toBeGreaterThan(sug.easy);
-    // Catégorie absente : estimation à partir de l'endurance.
-    const onlyEasy = suggestedCadences(parseWorkout('EF\n30:00\nPace | 6\'00\'\''), estimateCadence);
-    expect(onlyEasy.fast).toBeGreaterThan(onlyEasy.easy);
-    expect(onlyEasy.slow).toBeLessThan(onlyEasy.easy);
+  it('propositions : la séance d’abord, puis les sorties du coureur, puis une estimation', () => {
+    const history = { easy: 370, fast: 215, slow: 385 };
+    // BRULURE : EF a une plage (6:09–6:39) ; Rapide et Lent n'en ont pas.
+    expect(suggestedPaces(parseWorkout(BRULURE), 360, history)).toEqual({ easy: 384, fast: 215, slow: 385 });
+    expect(suggestedPaces(parseWorkout(BRULURE), 360)).toEqual({ easy: 384, fast: 288, slow: 430 });
+    // FRACTIONNE : toutes les catégories ont une allure dans la séance.
+    expect(suggestedPaces(parseWorkout(FRACTIONNE), 360, history)).toEqual({ easy: 345, fast: 290, slow: 330 });
+  });
+
+  it('les blocs sans allure prennent l’allure proposée de leur catégorie', () => {
+    const fill = { easy: 370, fast: 215, slow: 385 };
+    const steps = resolveSteps(parseWorkout(BRULURE), 360, undefined, fill);
+    expect(steps.find((s) => s.step.name === 'Rapide')!.pace).toBe(215);
+    expect(steps.find((s) => s.step.name === 'Lent')!.pace).toBe(385);
+    expect(steps.find((s) => s.step.name === 'EF')!.pace).toBe(384); // plage de la séance
+  });
+
+  it('allures habituelles d’après les tronçons enregistrés', () => {
+    const samples = [
+      ...Array.from({ length: 20 }, () => ({ speedKmh: 3600 / 365, weight: 300 })),
+      ...Array.from({ length: 6 }, () => ({ speedKmh: 3600 / 215, weight: 20 })),
+      ...Array.from({ length: 6 }, () => ({ speedKmh: 3600 / 390, weight: 120 })),
+    ];
+    expect(paceStats(samples)).toEqual({ easy: 365, fast: 215, slow: 390 });
+    expect(paceStats(samples.slice(0, 3))).toBeUndefined();
   });
 });

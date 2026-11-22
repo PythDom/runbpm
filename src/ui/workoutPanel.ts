@@ -6,9 +6,9 @@ import {
   parseWorkout,
   resolveSteps,
   stepCadence,
-  suggestedCadences,
-  type CadenceCategory,
-  type DefaultCadences,
+  suggestedPaces,
+  type CategoryPaces,
+  type PaceCategory,
   type Workout,
 } from '../core/workout';
 import { safeStorage } from '../services/spotify';
@@ -25,8 +25,8 @@ interface Saved {
   overrides: Record<string, number>;
   /** Séance importée par lien COROS (gardée pour ne pas la retélécharger). */
   imported?: Workout;
-  /** Cadences par défaut des blocs sans allure. */
-  defaults?: DefaultCadences;
+  /** Allures choisies par catégorie de bloc (s/km). */
+  paces?: CategoryPaces;
 }
 
 export const WORKOUT_SAMPLE = `4x 4min/3min
@@ -74,6 +74,8 @@ export class WorkoutPanel {
     /** Cadence (pas/min) pour une vitesse en km/h, selon le profil du coureur. */
     private readonly cadenceFor: (speedKmh: number) => number,
     private readonly fallbackPace: () => number,
+    /** Allures habituelles du coureur (sorties importées dans son profil), s'il y en a. */
+    private readonly historyPaces: () => Required<CategoryPaces> | undefined,
     private readonly onChange: () => void,
   ) {
     try {
@@ -88,26 +90,26 @@ export class WorkoutPanel {
     if (savedLink && !this.state.imported) void this.importLink(savedLink);
     el.defaults.addEventListener('click', (ev) => {
       if (!(ev.target as HTMLElement).closest('#workout-defaults-reset')) return;
-      this.state.defaults = {};
+      this.state.paces = {};
       this.save();
       this.render();
       this.onChange();
     });
     el.defaults.addEventListener('change', (ev) => {
       const input = ev.target as HTMLInputElement;
-      const key = input.dataset.default as CadenceCategory | undefined;
+      const key = input.dataset.default as PaceCategory | undefined;
       if (!key) return;
-      const v = Number.parseInt(input.value, 10);
-      const defaults = { ...this.state.defaults };
+      const v = parsePaceInput(input.value);
+      const paces = { ...this.state.paces };
       // Champ vidé : retour à la valeur proposée.
-      if (input.value.trim() === '') delete defaults[key];
-      else if (v >= 100 && v <= 220) defaults[key] = v;
+      if (input.value.trim() === '') delete paces[key];
+      else if (v) paces[key] = v;
       else {
         input.classList.add('invalid');
         return;
       }
       input.classList.remove('invalid');
-      this.state.defaults = defaults;
+      this.state.paces = paces;
       this.save();
       this.render();
       this.onChange();
@@ -167,9 +169,14 @@ export class WorkoutPanel {
     return this.parsed?.title;
   }
 
-  /** Cadences fixées par l'utilisateur, par catégorie de bloc (les autres suivent la séance). */
-  get defaults(): DefaultCadences {
-    return this.state.defaults ?? {};
+  /** Allures choisies par l'utilisateur, par catégorie de bloc (les autres suivent la séance). */
+  get paces(): CategoryPaces {
+    return this.state.paces ?? {};
+  }
+
+  /** Allures proposées par catégorie, pour les blocs sans allure dans la séance. */
+  get proposedPaces(): Required<CategoryPaces> {
+    return suggestedPaces(this.parsed, this.fallbackPace(), this.historyPaces());
   }
 
   /** Recalcule l'affichage (après un changement de profil ou d'allure de référence). */
@@ -246,16 +253,22 @@ export class WorkoutPanel {
     this.store.setItem(KEY, JSON.stringify(this.state));
   }
 
-  /** Champs des cadences : valeur fixée par l'utilisateur, sinon valeur proposée (en gris). */
+  /** Champs des allures : valeur choisie par l'utilisateur, sinon valeur proposée (en gris), et cadence correspondante. */
   private renderDefaults(): void {
-    const suggested = suggestedCadences(this.parsed, this.cadenceFor, this.fallbackPace());
-    const chosen = this.state.defaults ?? {};
+    const suggested = suggestedPaces(this.parsed, this.fallbackPace(), this.historyPaces());
+    const chosen = this.state.paces ?? {};
     for (const input of this.el.defaults.querySelectorAll<HTMLInputElement>('input[data-default]')) {
-      const key = input.dataset.default as CadenceCategory;
+      const key = input.dataset.default as PaceCategory;
       const own = chosen[key];
+      const pace = own ?? suggested[key];
       input.classList.toggle('suggested', !own);
-      input.title = own ? `Fixée par vous (proposée : ${suggested[key]})` : 'Valeur proposée d’après la séance ; modifiez-la pour adapter tous ces blocs';
-      if (document.activeElement !== input) input.value = String(own ?? suggested[key]);
+      input.classList.remove('invalid');
+      input.title = own
+        ? `Choisie par vous (proposée : ${formatPaceShort(suggested[key])} /km)`
+        : 'Allure proposée (séance, sinon vos sorties) ; modifiez-la pour adapter tous ces blocs';
+      if (document.activeElement !== input) input.value = formatPaceShort(pace);
+      const hint = this.el.defaults.querySelector(`[data-cadence="${key}"]`);
+      if (hint) hint.textContent = `≈ ${Math.round(this.cadenceFor(3600 / pace))} pas/min`;
     }
     const reset = this.el.defaults.querySelector<HTMLElement>('#workout-defaults-reset');
     if (reset) reset.hidden = !Object.keys(chosen).length;
@@ -284,11 +297,11 @@ export class WorkoutPanel {
       this.el.steps.innerHTML = '';
       return;
     }
-    const resolved = resolveSteps(w, this.fallbackPace());
+    const categories = this.paces;
+    const resolved = resolveSteps(w, this.fallbackPace(), categories, this.proposedPaces);
     const total = resolved.reduce((a, s) => a + s.duration, 0);
     const dist = resolved.reduce((a, s) => a + s.distance, 0);
     const estimated = resolved.some((s) => s.paceSource === 'estimée');
-    const defaults = this.defaults;
     const fromLink = !!parseCorosLink(this.state.text);
     const announced =
       w.totalDuration && Math.abs(total - w.totalDuration) > 30
@@ -298,7 +311,7 @@ export class WorkoutPanel {
     this.el.summary.innerHTML =
       `<strong>${esc(w.title)}</strong>${fromLink ? ' <span class="tag">COROS</span>' : ''}<br>${formatDuration(total)}${announced} · ≈ ${(dist / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} km · ` +
       `${resolved.length} bloc(s)` +
-      (estimated ? '<br><span class="small muted">Allures « estimées » : déduites des autres blocs, modifiables ci-dessous.</span>' : '');
+      (estimated ? '<br><span class="small muted">Blocs sans allure dans la séance (« prop. ») : allure proposée pour leur catégorie, modifiable ci-dessus ou bloc par bloc.</span>' : '');
 
     // Un rang par bloc distinct (les répétitions ne sont pas recopiées).
     const first = new Map(resolved.map((r) => [r.step, r]));
@@ -306,7 +319,7 @@ export class WorkoutPanel {
       b.steps.map((s, j) => {
         const r = first.get(s)!;
         const target = s.duration !== undefined ? formatDuration(s.duration) : `${((s.distance ?? 0) / 1000).toLocaleString('fr-FR')} km`;
-        const { cadence, fromDefault } = stepCadence(r, this.cadenceFor, defaults);
+        const cadence = stepCadence(r, this.cadenceFor);
         const range = s.paceLow !== undefined ? `${formatPaceShort(s.paceLow)}–${formatPaceShort(s.paceHigh!)}` : '';
         return `<tr class="${j === 0 && b.repeat > 1 ? 'rep-start' : ''}">
           <td>${j === 0 && b.repeat > 1 ? `<span class="tag">×${b.repeat}</span> ` : b.repeat > 1 ? '<span class="rep-indent"></span>' : ''}${esc(s.name)}</td>
@@ -314,8 +327,14 @@ export class WorkoutPanel {
           <td class="num"><input class="pace-edit" type="text" inputmode="decimal" data-step="${i}.${j}"
             value="${s.paceOverride ? formatPaceShort(s.paceOverride) : ''}" placeholder="${formatPaceShort(r.pace)}"
             title="${range ? `Plage indiquée : ${range} /km. ` : ''}Allure retenue (min:s par km) ; videz pour revenir à la valeur proposée"
-            aria-label="Allure de ${esc(s.name)}" />${r.paceSource === 'estimée' ? '<span class="tag warn" title="Pas d’allure dans la séance : estimée">est.</span>' : ''}</td>
-          <td class="num strong">${cadence}${fromDefault ? ' <span class="tag" title="Cadence fixée pour cette catégorie de bloc">fixée</span>' : ''}</td>
+            aria-label="Allure de ${esc(s.name)}" />${
+              r.paceSource === 'estimée'
+                ? '<span class="tag warn" title="Pas d’allure dans la séance : allure proposée pour sa catégorie">prop.</span>'
+                : r.paceSource === 'catégorie'
+                  ? '<span class="tag" title="Allure choisie pour cette catégorie de bloc">cat.</span>'
+                  : ''
+            }</td>
+          <td class="num strong">${cadence}</td>
         </tr>`;
       }),
     );

@@ -159,7 +159,87 @@ export function segmentActivity(samples: ActivitySample[], segmentMeters = 100):
   return { segments, distance: total };
 }
 
+/** Découpe une ligne CSV (valeurs entre guillemets, séparateur virgule ou point-virgule). */
+function csvCells(line: string, sep: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (quoted && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else quoted = !quoted;
+    } else if (ch === sep && !quoted) {
+      out.push(cur.trim());
+      cur = '';
+    } else cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+/** « 00:06:19 » ou « 6:19 » → secondes. */
+function clockSeconds(text: string): number {
+  const parts = text.trim().split(':').map(Number);
+  if (!parts.length || parts.some((n) => !Number.isFinite(n))) return NaN;
+  return parts.reduce((acc, n) => acc * 60 + n, 0);
+}
+
+/** Durée maximale comptée par tour : les longs tours d'échauffement n'écrasent pas les efforts courts. */
+const LAP_WEIGHT_CAP = 300;
+
+/**
+ * Export des tours d'une sortie (CSV COROS : « Split, Moving Time, GetDistance, Avg Run Cadence… ») :
+ * chaque tour devient un tronçon (vitesse, pente nette, cadence). La cadence d'un seul pied est doublée.
+ */
+export function segmentsFromLapsCsv(text: string): CadenceSegment[] {
+  return lapsFromCsv(text).segments;
+}
+
+function lapsFromCsv(text: string): { segments: CadenceSegment[]; distanceKm: number } {
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return { segments: [], distanceKm: 0 };
+  const sep = (lines[0].match(/;/g)?.length ?? 0) > (lines[0].match(/,/g)?.length ?? 0) ? ';' : ',';
+  const head = csvCells(lines[0], sep).map((h) => h.toLowerCase());
+  const col = (...names: string[]) => names.map((n) => head.indexOf(n)).find((i) => i >= 0) ?? -1;
+  const cTime = col('moving time', 'time', 'durée', 'duree');
+  const cDist = col('getdistance', 'distance');
+  const cCad = col('avg run cadence', 'avg cadence', 'cadence moyenne', 'cadence');
+  const cGain = col('elevation gain', 'dénivelé positif');
+  const cLoss = col('elev loss', 'elevation loss', 'dénivelé négatif');
+  if (cTime < 0 || cDist < 0 || cCad < 0) return { segments: [], distanceKm: 0 };
+  const laps: { seconds: number; km: number; cadence: number; net: number }[] = [];
+  for (const line of lines.slice(1)) {
+    const cells = csvCells(line, sep);
+    if (/summary|total|résumé/i.test(cells[0] ?? '')) continue;
+    const seconds = clockSeconds(cells[cTime] ?? '');
+    const km = Number.parseFloat((cells[cDist] ?? '').replace(',', '.'));
+    const cadence = Number.parseFloat((cells[cCad] ?? '').replace(',', '.'));
+    if (!(seconds > 0) || !(km > 0) || !(cadence > 0)) continue;
+    const num = (i: number) => (i >= 0 ? Number.parseFloat((cells[i] ?? '').replace(',', '.')) || 0 : 0);
+    laps.push({ seconds, km, cadence, net: num(cGain) - num(cLoss) });
+  }
+  const cadences = toStepsPerMinute(laps.map((l) => l.cadence));
+  const segments = laps
+    .map((l, i) => ({
+      speedKmh: l.km / (l.seconds / 3600),
+      gradePct: Math.max(-25, Math.min(25, (l.net / (l.km * 1000)) * 100)),
+      cadence: cadences[i],
+      weight: Math.min(l.seconds, LAP_WEIGHT_CAP),
+    }))
+    .filter((s) => s.speedKmh >= 5 && s.speedKmh <= 30 && s.cadence >= 120 && s.cadence <= 230);
+  return { segments, distanceKm: laps.reduce((a, l) => a + l.km, 0) };
+}
+
 export function readActivity(fileName: string, bytes: Uint8Array): ActivitySummary {
+  const head = new TextDecoder().decode(bytes.subarray(0, 400));
+  if (/\.csv$/i.test(fileName) || /cadence/i.test(head.split(/\r?\n/)[0] ?? '')) {
+    const { segments, distanceKm } = lapsFromCsv(new TextDecoder().decode(bytes));
+    if (segments.length < 2) throw new Error('Export de tours non reconnu : il faut les colonnes de durée, distance et cadence (CSV COROS).');
+    return { name: fileName, distanceKm, segments, warnings: [] };
+  }
   const isFit = /\.fit$/i.test(fileName) || String.fromCharCode(...bytes.subarray(8, 12)) === '.FIT';
   const parsed = isFit ? samplesFromFit(bytes) : samplesFromTcx(new TextDecoder().decode(bytes));
   if (!parsed.samples.some((s) => s.cadence)) throw new Error('Pas de cadence dans ce fichier (capteur ou montre sans mesure de cadence ?).');

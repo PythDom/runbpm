@@ -265,8 +265,24 @@ const workoutPanel = new WorkoutPanel(
   },
   cadenceForSpeed,
   () => parsePace(paceInput.value) ?? 360,
+  () => profiles.paceHistory(),
   () => update(),
 );
+
+// Écran Séance : import de sorties pour le calibrage du profil (l'écran Allure y est sauté).
+let calibInfoBusy = false;
+$<HTMLInputElement>('workout-calib-files').addEventListener('change', async (ev) => {
+  const input = ev.target as HTMLInputElement;
+  const files = Array.from(input.files ?? []);
+  if (!files.length) return;
+  calibInfoBusy = true;
+  $('workout-calib-info').textContent = 'Lecture des sorties…';
+  const msg = await profiles.addActivities(files);
+  input.value = '';
+  calibInfoBusy = false;
+  update();
+  $('workout-calib-info').textContent = `${msg} ${profiles.calibrationSummary() ?? ''}`.trim();
+});
 
 paceInput.addEventListener('input', () => {
   const pace = parsePace(paceInput.value);
@@ -787,6 +803,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   if (!pace && !workout) errors.push('Allure invalide : utilisez le format min:s, par exemple 5:30.');
   workoutPanel.refresh();
   $('workout-pace-hint').hidden = workoutPanel.mode !== 'workout';
+  if (!calibInfoBusy) $('workout-calib-info').textContent = profiles.calibrationSummary() ?? 'Sans sorties importées : cadence estimée d’après la vitesse.';
   $('legend-elev').hidden = !!workout;
   const svc = service();
   // On écarte les morceaux sans pulsation détectée, les douteux si l'option est active ; pour Spotify,
@@ -850,7 +867,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   // pente homogène, cadence au plat X ajustée par tranche de pente.
   const sections = workout ? [] : splitSections(route!);
   const plan = workout
-    ? workoutPlan(workout, cadenceForSpeed, pace ?? 360, workoutPanel.defaults)
+    ? workoutPlan(workout, cadenceForSpeed, pace ?? 360, workoutPanel.paces, workoutPanel.proposedPaces)
     : planRun(sections, {
         targetPace: pace!,
         mode: $<HTMLSelectElement>('mode').value as PacingMode,
