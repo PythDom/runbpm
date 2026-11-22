@@ -2,6 +2,7 @@ import { readActivity, type CadenceSegment } from '../core/activity';
 import { calibrate, predictCadence, type CalibrationResult } from '../core/calibration';
 import type { PlanOptions } from '../core/pacing';
 import { DEFAULT_SLOPE_RULES, rangeLabel, withValues, type SlopeRule } from '../core/slopeRules';
+import { paceStats, type CategoryPaces } from '../core/workout';
 import { safeStorage } from '../services/spotify';
 import { confirmClick } from './confirm';
 import { fileAccept } from './native';
@@ -43,6 +44,10 @@ const fr = (n: number, d = 1) => n.toLocaleString('fr-FR', { minimumFractionDigi
 function newProfile(name: string): RunnerProfile {
   return { id: `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, name, baseCadence: '', useCalibration: true };
 }
+
+/** Allures (s/km) du tableau de conversion allure → cadence. */
+const PACE_TABLE = [420, 390, 360, 330, 300, 270, 240, 210];
+const paceLabel = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 
 export class ProfilePanel {
   private readonly store = safeStorage(() => localStorage);
@@ -189,6 +194,15 @@ export class ProfilePanel {
    * Cadence au plat X issue du calibrage pour une vitesse cible donnée (la pente est gérée par les
    * règles par tranche, qui décrivent déjà la cadence en côte).
    */
+  /**
+   * Allures habituelles du coureur (cible, rapide, lent) d'après les sorties importées pour le
+   * calibrage, si le calibrage est utilisé.
+   */
+  paceHistory(): Required<CategoryPaces> | undefined {
+    const cal = this.current.calibration;
+    return cal && this.current.useCalibration ? paceStats(cal.segments) : undefined;
+  }
+
   planOptions(targetKmh: number): Partial<PlanOptions> | undefined {
     const cal = this.current.calibration;
     if (!this.calibrationActive || !cal) return undefined;
@@ -231,8 +245,9 @@ export class ProfilePanel {
     this.el.hint.textContent = cal ? 'Cadence au plat issue du calibrage de ce profil.' : '';
   }
 
-  private async addActivities(files: File[]): Promise<void> {
-    if (files.length === 0) return;
+  /** Ajoute des sorties au calibrage du profil courant ; renvoie le message de résultat. */
+  async addActivities(files: File[]): Promise<string> {
+    if (files.length === 0) return '';
     const p = this.current;
     const errors: string[] = [];
     const added: string[] = [];
@@ -275,6 +290,15 @@ export class ProfilePanel {
     this.applyToInputs();
     this.render();
     this.onChange();
+    return this.message;
+  }
+
+  /** Résumé du calibrage du profil courant (sorties, conversion allure → cadence), ou undefined. */
+  calibrationSummary(): string | undefined {
+    const cal = this.current.calibration;
+    if (!cal || !this.current.useCalibration) return undefined;
+    const at = (sec: number) => `${paceLabel(sec)} → ${Math.round(predictCadence(cal.model, 3600 / sec))}`;
+    return `Profil « ${this.current.name} » : ${cal.activities.length} sortie(s) · ${[390, 330, 270, 210].map(at).join(' · ')} pas/min`;
   }
 
   private renderRules(): void {
@@ -308,13 +332,14 @@ export class ProfilePanel {
     const p = this.current;
     const cal = p.calibration;
     const msg = this.message ? `<p class="small ${this.messageIsError ? 'error-text' : 'muted'}">${esc(this.message)}</p>` : '';
-    const fileInput = `<label class="file compact"><input type="file" id="calibration-files" accept="${fileAccept('.fit,.tcx')}" multiple />
-      <span>${cal ? 'Ajouter des sorties' : 'Calibrer avec des sorties enregistrées'} (FIT, TCX)</span></label>`;
+    const fileInput = `<label class="file compact"><input type="file" id="calibration-files" accept="${fileAccept('.fit,.tcx,.csv')}" multiple />
+      <span>${cal ? 'Ajouter des sorties' : 'Calibrer avec des sorties enregistrées'} (FIT, TCX ou CSV des tours)</span></label>`;
     if (!cal) {
       this.el.calibration.innerHTML = `
         <h3 class="calib-title">Calibrage personnel</h3>
-        <p class="small muted">Importez une ou plusieurs sorties de votre montre (fichier FIT ou TCX avec cadence),
-          de préférence vallonnées : RunBPM en déduit votre cadence selon la vitesse et la pente.</p>
+        <p class="small muted">Importez une ou plusieurs sorties de votre montre (fichier FIT ou TCX avec cadence, ou
+          export CSV des tours depuis COROS), si possible à des allures variées : RunBPM en déduit votre cadence selon
+          l’allure (et la pente).</p>
         ${fileInput}${msg}`;
       return;
     }
@@ -325,7 +350,7 @@ export class ProfilePanel {
       <h3 class="calib-title">Calibrage personnel</h3>
       <label class="check"><input type="checkbox" id="calibration-use" ${p.useCalibration ? 'checked' : ''} /> Utiliser le calibrage de « ${esc(p.name)} »</label>
       <table class="calib-table small">
-        <tr><td>Cadence au plat</td><td>${Math.round(predictCadence(m, 10))} pas/min à 10 km/h · ${Math.round(predictCadence(m, 12))} à 12 km/h</td></tr>
+        <tr><td>Allure → cadence</td><td>${PACE_TABLE.map((sec) => `${paceLabel(sec)} → <strong>${Math.round(predictCadence(m, 3600 / sec))}</strong>`).join(' · ')}</td></tr>
         <tr><td>Effet de la vitesse</td><td>${m.kv >= 0 ? '+' : ''}${fr(m.kv)} pas/min par km/h</td></tr>
         <tr><td>Pente mesurée</td><td>${m.uphill >= 0 ? '+' : ''}${fr(m.uphill, 2)} / ${m.downhill >= 0 ? '+' : ''}${fr(m.downhill, 2)} pas/min par % (montée / descente), pour information : le tableau ci-dessus s’applique</td></tr>
         <tr><td>Données</td><td>${cal.activities.length} sortie(s), ${fr(km)} km · vitesses ${fr(m.speedRange[0])}–${fr(m.speedRange[1])} km/h · pentes ${fr(m.gradeRange[0])} à ${fr(m.gradeRange[1])} % · écart moyen ${fr(m.rmse)} pas/min</td></tr>

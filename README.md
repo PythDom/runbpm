@@ -180,8 +180,11 @@ Cool Down
   totale annoncée (`44:00 8.31km`) départage les cas douteux.
 - Un bloc sans allure est **estimé** : effort ≈ 25 % plus rapide que l’endurance, récupération ≈ 12 %
   plus lente, marche à 115 pas/min. Toutes les allures sont modifiables dans le tableau.
-- **Cadences par catégorie** (Cible, Rapide, Lent) : préremplies avec ce que la séance donne déjà ;
-  en modifier une adapte tous les blocs de cette catégorie (↺ pour revenir aux valeurs proposées).
+- **Allures par catégorie** (Cible, Rapide, Lent, en min/km) : proposées d’après la séance, sinon
+  d’après vos sorties importées (cible = allure la plus pratiquée, rapide / lent = vos 10 % de tours
+  les plus rapides / lents), sinon estimées. Les blocs sans allure prennent celle de leur catégorie ;
+  en modifier une adapte tous les blocs de la catégorie (↺ pour revenir aux propositions). La
+  cadence de chaque bloc suit la conversion allure → cadence du profil.
 - Cadence de chaque bloc : celle du profil coureur à cette vitesse (calibrage, cadence au plat saisie,
   ou estimation).
 - Avec **Navidrome**, chaque bloc a sa musique : les morceaux sont **coupés aux changements d’allure**
@@ -212,10 +215,13 @@ Le tableau des sections indique la tranche de chacune, et le conseil s’affiche
 ### Profils coureur et calibrage personnel
 
 Chaque **profil coureur** (carte Course) garde ses propres réglages : cadence au plat et tableau des
-tranches de pente. On peut aussi **calibrer** un profil avec une
+tranches de pente. On peut aussi **calibrer** un profil (aussi depuis l’écran Séance) avec un ou
+plusieurs **exports CSV des tours COROS** (un point par tour : vitesse, pente nette, cadence ×2 ;
+durée comptée jusqu’à 5 min par tour) ou une
 ou plusieurs sorties de sa montre (**FIT** ou TCX avec cadence), de préférence vallonnées :
 
-- les sorties sont découpées en tronçons de 100 m (vitesse, pente, cadence) ; arrêts, marche, cadences
+- le profil affiche la conversion obtenue (ex. 6:30 → 168 · 5:00 → 174 · 3:30 → 186 pas/min) ;
+- les sorties FIT/TCX sont découpées en tronçons de 100 m (vitesse, pente, cadence) ; arrêts, marche, cadences
   aberrantes et pentes extrêmes sont écartés ; la cadence « un pied » des montres est doublée ;
 - le modèle `cadence = k0 + kv × vitesse + a × montée(%) + b × descente(%)` est ajusté par moindres
   carrés, avec un rappel doux vers les valeurs par défaut : une sortie plate ne renseigne pas sur la
