@@ -60,6 +60,8 @@ export interface PlannedSection extends Section {
   ruleId?: string;
   /** Nom du bloc (séance d'entraînement : « Rapide (2/5) »…). */
   label?: string;
+  /** Catégorie d'allure du bloc (séance) : lent, cible ou rapide. */
+  category?: 'easy' | 'fast' | 'slow';
   startTime: number;
   endTime: number;
 }

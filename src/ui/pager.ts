@@ -18,7 +18,6 @@ export class Pager {
   constructor(
     private readonly pager: HTMLElement,
     tabbar: HTMLElement,
-    private readonly title: HTMLElement,
   ) {
     this.screens = Array.from(pager.querySelectorAll<HTMLElement>(':scope > .screen'));
     this.tabs = Array.from(tabbar.querySelectorAll<HTMLButtonElement>('button[data-tab]'));
@@ -106,7 +105,6 @@ export class Pager {
       if (k === i) t.setAttribute('aria-current', 'step');
       else t.removeAttribute('aria-current');
     });
-    this.title.textContent = this.screens[i]?.dataset.title ?? '';
     try {
       localStorage.setItem(KEY, String(i));
     } catch {

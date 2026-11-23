@@ -95,6 +95,14 @@ export function renderChart(
     }
   }
 
+  // Séance : fond coloré par catégorie d'allure de chaque bloc.
+  if (timeAxis) {
+    for (const s of plan.sections) {
+      if (!s.category) continue;
+      parts.push(`<rect class="band cat-${s.category}" x="${x(from(s)).toFixed(1)}" y="${M.top}" width="${Math.max(0, x(to(s)) - x(from(s))).toFixed(1)}" height="${plotH}"/>`);
+    }
+  }
+
   // Cadence cible en escalier
   const steps = plan.sections
     .map((s) => `L${x(from(s)).toFixed(1)},${yC(s.cadence).toFixed(1)} L${x(to(s)).toFixed(1)},${yC(s.cadence).toFixed(1)}`)

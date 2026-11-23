@@ -130,7 +130,7 @@ export class NavidromePanel {
     if (!this.connected) {
       const saved = this.draft ?? this.saved();
       this.root.innerHTML = `
-        <p class="muted small">Lecture dans RunBPM depuis votre serveur, <strong>avec ajustement du tempo</strong>.</p>
+        <p class="muted small">Musique lue dans RunBPM depuis votre serveur, <strong>au tempo de votre cadence</strong>.</p>
         <label>Adresse du serveur
           <input type="text" id="nd-url" value="${esc(saved?.url ?? import.meta.env.VITE_NAVIDROME_URL ?? '')}" placeholder="http://192.168.1.10:4533" autocomplete="url" spellcheck="false" />
         </label>
@@ -152,13 +152,12 @@ export class NavidromePanel {
       ? `<div class="row"><progress max="${Math.max(1, this.importing.total)}" value="${this.importing.done}"></progress>
            <button type="button" data-nd="stop">Arrêter</button></div>
          <p class="small muted ellipsis">${esc(this.importing.text)}</p>`
-      : `<div class="row"><button type="button" class="primary" data-nd="import">Importer la bibliothèque du serveur</button></div>`;
+      : `<div class="row"><button type="button" data-nd="import">Mettre à jour la bibliothèque</button></div>`;
     this.root.innerHTML = `
-      <p class="summary">Connecté à <strong>${esc(this.server!.name)}</strong>${this.server!.version ? ` ${esc(this.server!.version)}` : ''}
-        (${esc(creds.user)}) <button type="button" class="link danger" data-nd="logout">Se déconnecter</button></p>
-      <p class="muted small ellipsis">${esc(creds.url)}</p>
+      <p class="connected-line" title="${esc(creds.url)}"><span class="ok-dot" aria-hidden="true">✓</span>
+        <span><strong>${esc(this.server!.name)}</strong> · ${esc(creds.user)}</span>
+        <button type="button" class="link danger" data-nd="logout">Se déconnecter</button></p>
       ${importBlock}
-      <p class="muted small">BPM des tags si disponible (option de la carte Musique), sinon mesuré en lisant un extrait de chaque morceau.</p>
       ${status}`;
   }
 }
