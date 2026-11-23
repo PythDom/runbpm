@@ -15,6 +15,24 @@ Tout est calculé dans l’application, aucun fichier audio n’est envoyé. Run
 Android** (APK) et en page web ; une **base partagée** (petit serveur Python, par exemple sur
 PythonAnywhere) garde les BPM mesurés et la sélection de chacun.
 
+## Écrans (téléphone)
+
+Quatre écrans, à faire glisser ou à ouvrir par la barre du bas ; le bouton **?** de l’en-tête ouvre le
+mode d’emploi.
+
+1. **Séance / Parcours** : lien COROS ou texte de la séance (replié une fois lu), carte de la séance avec
+   les blocs en barres colorées (lent en bleu, cible en vert, rapide en orange), allures Lent / Cible /
+   Rapide, « Ma cadence » (calibrage par CSV) ; ou parcours GPX. L’écran Allure n’apparaît qu’en mode
+   parcours.
+2. **Musique** : la source en tuiles (Navidrome, Spotify, Deezer, Fichiers), sa connexion résumée en une
+   ligne une fois faite, puis la bibliothèque et ses options.
+3. **Playlist** : chiffres clés, graphique de cadence (fond coloré par bloc), morceaux regroupés par bloc
+   avec pochette (Navidrome) ; glisser une ligne change le morceau. Tant qu’il manque quelque chose, une
+   liste de contrôle indique quoi et mène au bon écran.
+4. **Courir** : « Mode course plein écran » (ouvert aussi au départ de la lecture) : bloc en cours, temps
+   restant, allure visée en très grand, cadence, bloc suivant, gros boutons ; vibration (et bip en
+   option) à chaque changement de bloc.
+
 ## Démarrage
 
 ```bash
@@ -227,7 +245,10 @@ ou plusieurs sorties de sa montre (**FIT** ou TCX avec cadence), de préférence
   carrés, avec un rappel doux vers les valeurs par défaut : une sortie plate ne renseigne pas sur la
   pente, les coefficients de pente restent alors proches de 0,6 / 0,3 ;
 - une fois calibré, la cadence au plat X suit l'allure choisie ; les tranches de pente s'appliquent
-  ensuite (les coefficients de pente mesurés sont affichés pour information).
+  ensuite (les coefficients de pente mesurés sont affichés pour information) ;
+- recharger un fichier déjà importé (même nom) remplace ses anciens points ; « Réinitialiser les
+  cadences » (écran Séance) ou « Effacer le calibrage » (profil) oublie toutes les sorties, la cadence
+  revient alors à l’estimation par la vitesse jusqu’au prochain import.
 
 Le lecteur FIT est intégré (sans dépendance) : en-têtes compressés, gros/petit-boutisme, CRC, activités
 autres que la course à pied refusées.

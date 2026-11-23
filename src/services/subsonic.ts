@@ -134,6 +134,11 @@ export class SubsonicClient {
     return this.url('stream', params);
   }
 
+  /** Pochette d'un morceau (Navidrome accepte l'identifiant du morceau). */
+  coverUrl(id: string, size = 96): string {
+    return this.url('getCoverArt', { id, size });
+  }
+
   /** Lit une plage d'octets du fichier d'origine (requête HTTP Range). */
   async readRange(id: string, offset: number, length: number): Promise<Uint8Array> {
     const res = await this.fetchImpl(this.streamUrl(id), { headers: { Range: `bytes=${offset}-${offset + length - 1}` } });

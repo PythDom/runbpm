@@ -33,7 +33,7 @@ const LIBRARY_KEY = 'runbpm.library';
 const SERVICE_KEY = 'runbpm.service';
 /** Réglages du formulaire conservés pendant l'aller-retour de connexion à Spotify. */
 // (cadence de base et coefficients de pente sont mémorisés dans le profil coureur)
-const SETTINGS_IDS = ['pace', 'speed', 'mode', 'tolerance', 'stretch', 'half-time', 'repeat', 'hide-doubtful', 'only-selected', 'use-tag-bpm', 'm-volume', 'm-overlay', 'm-offset', 'keep-awake'];
+const SETTINGS_IDS = ['pace', 'speed', 'mode', 'tolerance', 'stretch', 'half-time', 'repeat', 'hide-doubtful', 'only-selected', 'use-tag-bpm', 'm-volume', 'm-overlay', 'm-offset', 'keep-awake', 'block-alert', 'block-beep'];
 const PENDING_KEY = 'runbpm.pending';
 
 const state: {
@@ -55,6 +55,8 @@ let lastExport: { m3u: string; csv: string; json: string } | undefined;
 let companionSignature = '';
 let playerSignature = '';
 let companionSynced = false;
+/** Morceaux utilisables lors du dernier calcul (liste de contrôle des écrans vides). */
+let usableCount = 0;
 
 // ---------- Utilitaires ----------
 
@@ -262,6 +264,7 @@ const workoutPanel = new WorkoutPanel(
     steps: $('workout-steps'),
     summary: $('workout-summary'),
     defaults: $('workout-defaults'),
+    edit: $<HTMLDetailsElement>('workout-edit'),
   },
   cadenceForSpeed,
   () => parsePace(paceInput.value) ?? 360,
@@ -282,6 +285,15 @@ $<HTMLInputElement>('workout-calib-files').addEventListener('change', async (ev)
   calibInfoBusy = false;
   update();
   $('workout-calib-info').textContent = `${msg} ${profiles.calibrationSummary() ?? ''}`.trim();
+});
+
+// Réinitialisation : on oublie les sorties importées, la cadence revient à l'estimation par la vitesse.
+$('workout-calib-reset').addEventListener('click', (ev) => {
+  confirmClick(ev.currentTarget as HTMLElement, 'Confirmer : effacer les sorties importées', () => {
+    profiles.clearCalibration();
+    update();
+    $('workout-calib-info').textContent = 'Cadences réinitialisées : rechargez vos CSV pour les recalculer.';
+  });
 });
 
 paceInput.addEventListener('input', () => {
@@ -672,8 +684,29 @@ $('create-navidrome').addEventListener('click', async () => {
   }
 });
 
+/** Tuiles de choix de la source : choisie, connectée. */
+function renderServiceTiles(): void {
+  const s = service();
+  for (const b of document.querySelectorAll<HTMLElement>('#service-tiles [data-service]')) {
+    const svc = b.dataset.service as Service;
+    b.setAttribute('aria-pressed', String(svc === s));
+    b.classList.toggle('connected', (svc === 'navidrome' && navidrome.connected) || (svc === 'spotify' && spotify.connected));
+  }
+}
+
+$('service-tiles').addEventListener('click', (ev) => {
+  const svc = (ev.target as HTMLElement).closest<HTMLElement>('[data-service]')?.dataset.service;
+  const select = $<HTMLSelectElement>('service');
+  if (!svc || svc === select.value) return;
+  select.value = svc;
+  select.dispatchEvent(new Event('change'));
+});
+
 function renderService(): void {
   const s = service();
+  renderServiceTiles();
+  // Fichiers locaux : utiles surtout sans Navidrome (qui fournit sa bibliothèque).
+  $<HTMLDetailsElement>('local-sources').open = s !== 'navidrome' && state.library.length === 0;
   $('navidrome-panel').hidden = s !== 'navidrome';
   $('shared-panel').hidden = s !== 'navidrome';
   $('stretch-row').hidden = s !== 'navidrome';
@@ -763,7 +796,51 @@ $('reroll').addEventListener('click', () => {
   update();
 });
 
-const pager = new Pager($('pager'), $('tabbar'), $('screen-title'));
+const pager = new Pager($('pager'), $('tabbar'));
+
+const SERVICE_NAME: Record<Service, string> = { navidrome: 'Navidrome', spotify: 'Spotify', deezer: 'Deezer', none: 'Fichiers' };
+
+/** Étapes restantes avant d'avoir une playlist, avec un lien vers l'écran concerné. */
+function checklist(): { done: boolean; text: string; go: number; action: string }[] {
+  const svc = service();
+  const workoutMode = workoutPanel.mode === 'workout';
+  const items = [
+    workoutMode
+      ? { done: !!workoutPanel.workout, text: workoutPanel.workout ? `Séance « ${workoutPanel.workout.title} »` : 'Choisir une séance (lien COROS ou texte)', go: 0, action: 'Séance' }
+      : { done: !!state.route, text: state.route ? `Parcours « ${state.route.name} »` : 'Charger un parcours (GPX)', go: 0, action: 'Parcours' },
+  ];
+  if (!workoutMode) items.push({ done: !!parsePace(paceInput.value), text: 'Allure cible', go: 1, action: 'Allure' });
+  const connected = svc === 'navidrome' ? navidrome.connected : svc === 'spotify' ? spotify.connected : true;
+  items.push({
+    done: connected,
+    text: connected ? `Source : ${SERVICE_NAME[svc]}${svc === 'navidrome' || svc === 'spotify' ? ' connecté' : ''}` : `Se connecter à ${SERVICE_NAME[svc]}`,
+    go: 2,
+    action: 'Musique',
+  });
+  items.push({
+    done: usableCount > 0,
+    text:
+      usableCount > 0
+        ? `${usableCount} morceau${usableCount > 1 ? 'x' : ''} utilisable${usableCount > 1 ? 's' : ''}`
+        : svc === 'navidrome' && navidrome.connected
+          ? 'Importer la bibliothèque du serveur'
+          : 'Ajouter des morceaux à la bibliothèque',
+    go: 2,
+    action: 'Musique',
+  });
+  return items;
+}
+
+function renderChecklists(): void {
+  const html = checklist()
+    .map(
+      (c) => `<li class="${c.done ? 'ok' : 'todo'}"><span class="ck" aria-hidden="true">${c.done ? '✓' : '!'}</span><span>${esc(c.text)}</span>${
+        c.done ? '' : `<button type="button" class="primary" data-go="${c.go}">${c.action}</button>`
+      }</li>`,
+    )
+    .join('');
+  for (const ul of document.querySelectorAll('.card.empty .checklist')) ul.innerHTML = html;
+}
 
 /** Coche les onglets des étapes faites (après chaque recalcul). */
 function refreshSteps(): void {
@@ -771,14 +848,18 @@ function refreshSteps(): void {
   // Séance : l'allure de chaque bloc vient de la séance, l'étape Allure est sautée sur téléphone.
   const workoutMode = workoutPanel.mode === 'workout';
   pager.setSkipped(1, workoutMode);
+  $('tab-plan').textContent = workoutMode ? 'Séance' : 'Parcours';
   $('next-route').dataset.go = workoutMode ? '2' : '1';
   $('next-route').firstChild!.textContent = workoutMode ? 'Musique ' : 'Allure et cadence ';
   pager.setDone(0, workoutMode ? !!workoutPanel.workout : !!state.route);
   pager.setDone(1, !!parsePace(paceInput.value));
-  pager.setDone(2, state.library.length > 0);
-  pager.setDone(3, svc === 'navidrome' ? navidrome.connected : svc === 'spotify' ? spotify.connected : true);
+  pager.setDone(2, usableCount > 0 && (svc === 'navidrome' ? navidrome.connected : svc === 'spotify' ? spotify.connected : true));
+  pager.setDone(3, !!state.current);
   pager.setDone(4, !!state.current);
-  pager.setDone(5, !!state.current);
+  // En-tête : la sortie préparée.
+  $('screen-title').textContent = workoutMode ? (workoutPanel.workout?.title ?? '') : (state.route?.name ?? '');
+  renderChecklists();
+  renderServiceTiles();
 }
 
 /** Playlist prête ou non : résultats et lecteur, ou écrans d'attente. */
@@ -803,7 +884,9 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   if (!pace && !workout) errors.push('Allure invalide : utilisez le format min:s, par exemple 5:30.');
   workoutPanel.refresh();
   $('workout-pace-hint').hidden = workoutPanel.mode !== 'workout';
+  $('workout-calib-reset').hidden = !profiles.hasCalibration;
   if (!calibInfoBusy) $('workout-calib-info').textContent = profiles.calibrationSummary() ?? 'Sans sorties importées : cadence estimée d’après la vitesse.';
+  $('workout-calib-short').textContent = profiles.calibrationActive ? '· calibrée sur vos sorties' : '· estimée';
   $('legend-elev').hidden = !!workout;
   const svc = service();
   // On écarte les morceaux sans pulsation détectée, les douteux si l'option est active ; pour Spotify,
@@ -840,14 +923,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   else if (onlySelected && library.length > 0) {
     extraWarnings = [...extraWarnings, 'Aucun morceau coché utilisable : cochez des morceaux dans la Bibliothèque. Tous les morceaux sont proposés en attendant.'];
   }
-  if (svc === 'navidrome' && state.library.length > 0 && library.length === 0) {
-    extraWarnings = [
-      ...extraWarnings,
-      navidrome.connected
-        ? 'Aucun morceau du serveur dans la bibliothèque : cliquez sur « Importer la bibliothèque du serveur ».'
-        : 'Connectez-vous à votre serveur Navidrome (carte Streaming).',
-    ];
-  }
+  usableCount = library.length;
 
   const planReady = workoutPanel.mode === 'workout' ? !!workout : !!state.route && !!pace;
   if (!planReady || library.length === 0) {
@@ -924,8 +1000,24 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
     ? renderChart([], plan, playlist, tolerance, true)
     : renderChart(smoothedProfile(route!), plan, playlist, tolerance);
 
+  const coverOf = (song: Song) =>
+    svc === 'navidrome' && song.navidromeId && navidrome.client
+      ? `<img class="cover" loading="lazy" alt="" src="${esc(navidrome.client.coverUrl(song.navidromeId, 96))}" />`
+      : `<span class="cover none" aria-hidden="true">♪</span>`;
+  // Séance : les morceaux sont regroupés par bloc (titre du bloc, allure, cadence).
+  let lastSection = -1;
+  const groupRow = (t: number) => {
+    if (!workout) return '';
+    const k = plan.sections.findIndex((x) => t < x.endTime - 0.5);
+    if (k < 0 || k === lastSection) return '';
+    lastSection = k;
+    const sec = plan.sections[k];
+    return `<tr class="group cat-${sec.category ?? 'easy'}"><td colspan="10"><span class="dot"></span>${esc(sec.label ?? '')} · ${formatPace(sec.pace)} /km · ${sec.cadence} pas/min</td></tr>`;
+  };
+  $('playlist').classList.toggle('no-covers', svc !== 'navidrome');
   $('playlist').querySelector('tbody')!.innerHTML = playlist.entries
     .map((e, i) => {
+      const group = groupRow(e.startTime);
       const ok = e.error <= tolerance + 1e-9;
       const rate = e.playbackRate === 1 ? '—' : `${e.playbackRate > 1 ? '+' : ''}${((e.playbackRate - 1) * 100).toFixed(1)} %`;
       const tags = [
@@ -934,11 +1026,12 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
         e.repeated ? '<span class="tag">bis</span>' : '',
       ].join(' ');
       const swapped = swaps.map[state.current!.generated.entries[i]?.song.id ?? ''] === e.song.id;
-      return `<tr class="${ok ? '' : 'off'} ${swapped ? 'swapped' : ''}" data-i="${i}">
+      return `${group}<tr class="${ok ? '' : 'off'} ${swapped ? 'swapped' : ''}" data-i="${i}">
         <td><button type="button" class="row-play" data-i="${i}" aria-label="Aller au morceau ${i + 1}" title="${svc === 'navidrome' ? 'Lire à partir de ce morceau' : 'Recaler le métronome sur ce morceau'}">${i + 1}</button></td>
         <td>${formatDuration(e.startTime)}</td>
         <td>${km(distanceAt(plan, e.startTime), 1)}</td>
-        <td><div class="song-title">${esc(e.song.title)}</div><div class="muted small">${esc(e.song.artist)} ${tags}</div></td>
+        <td class="cover-col">${coverOf(e.song)}</td>
+        <td><div class="song-title">${esc(e.song.title)}</div><div class="muted small">${esc(e.song.artist)}<span class="m-only"> · ${e.song.bpm} BPM${e.multiplier === 2 ? ' ×2' : ''}</span> ${tags}</div></td>
         <td class="num">${e.song.bpm}${e.multiplier === 2 ? ' <span class="tag" title="Un pas par demi-temps">×2</span>' : ''}</td>
         <td class="num">${rate}</td>
         <td class="num strong">${e.effectiveCadence}</td>
@@ -1067,12 +1160,94 @@ function renderRun(snap: CompanionSnapshot): void {
     $('run-km').textContent = snap.runTime >= current.plan.totalTime ? 'Arrivée !' : `km ${km(d, 1)} · cible ${cadenceAt(current.plan, snap.runTime)} pas/min`;
     showTip(current.plan, snap.runTime);
   }
+  renderHud(snap.runTime, current && snap.index >= 0 ? snap.index : -1, snap.running, 0);
   $('run-cad').classList.toggle('silent', !snap.clicking);
 
   for (const row of $('playlist').querySelectorAll<HTMLTableRowElement>('tbody tr')) {
     row.classList.toggle('current', Number(row.dataset.i) === snap.index && (snap.running || snap.runTime > 0));
   }
 }
+
+// ---------- Mode course plein écran ----------
+
+const hud = $('run-hud');
+let hudWasPlaying = false;
+let hudSection = -1;
+
+function setHud(open: boolean): void {
+  hud.hidden = !open;
+  document.body.classList.toggle('hud-on', open);
+}
+$('hud-open').addEventListener('click', () => setHud(true));
+$('hud-close').addEventListener('click', () => setHud(false));
+$('hud-toggle').addEventListener('click', () => $('run-toggle').click());
+$('hud-prev').addEventListener('click', () => $('run-prev').click());
+$('hud-next-btn').addEventListener('click', () => $('run-next').click());
+
+/** Bip court au changement de bloc (option), par-dessus la musique. */
+let beepCtx: AudioContext | undefined;
+function beep(): void {
+  try {
+    beepCtx ??= new AudioContext();
+    const t = beepCtx.currentTime;
+    for (const [at, f] of [[0, 880], [0.18, 1320]] as const) {
+      const osc = beepCtx.createOscillator();
+      const gain = beepCtx.createGain();
+      osc.frequency.value = f;
+      gain.gain.setValueAtTime(0.0001, t + at);
+      gain.gain.exponentialRampToValueAtTime(0.4, t + at + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.15);
+      osc.connect(gain).connect(beepCtx.destination);
+      osc.start(t + at);
+      osc.stop(t + at + 0.16);
+    }
+  } catch {
+    /* audio indisponible */
+  }
+}
+
+/** Changement de bloc pendant la course : vibration et bip selon les options. */
+function blockAlert(): void {
+  if ($<HTMLInputElement>('block-alert').checked) navigator.vibrate?.([250, 120, 250]);
+  if ($<HTMLInputElement>('block-beep').checked) beep();
+}
+
+/** Affichage plein écran : bloc en cours, allure visée, cadence, temps restant, bloc suivant. */
+function renderHud(runTime: number, index: number, playing: boolean, songProgress: number): void {
+  const current = state.current;
+  // Départ de la lecture sur téléphone : on passe en plein écran.
+  if (playing && !hudWasPlaying && pager.mobile) setHud(true);
+  hudWasPlaying = playing;
+  $('hud-toggle').classList.toggle('playing', playing);
+  $('hud-time').textContent = formatDuration(runTime);
+  const entry = current && index >= 0 ? current.playlist.entries[index] : undefined;
+  $('hud-song').textContent = entry ? `${entry.song.title} · ${entry.song.artist}` : '—';
+  if (!current) return;
+  const plan = current.plan;
+  const k = Math.max(0, plan.sections.findIndex((x) => runTime < x.endTime));
+  const sec = plan.sections[k] ?? plan.sections[plan.sections.length - 1];
+  const finished = runTime >= plan.totalTime && runTime > 0;
+  if (playing && k !== hudSection && hudSection >= 0 && sec?.label) blockAlert();
+  hudSection = playing || runTime > 0 ? k : -1;
+  hud.className = `run-hud cat-${sec?.category ?? 'easy'}`;
+  $('hud-block').textContent = finished ? 'Arrivée !' : (sec?.label ?? (state.route?.name ?? 'Course'));
+  $('hud-left').textContent = sec && !finished ? `encore ${formatDuration(Math.max(0, sec.endTime - runTime))}` : '';
+  $('hud-pace').textContent = sec ? formatPace(sec.pace) : '—';
+  $('hud-cad').textContent = entry ? String(Math.round(entry.effectiveCadence)) : String(sec?.cadence ?? '—');
+  const next = plan.sections[k + 1];
+  $('hud-next').textContent = next?.label ? `Ensuite : ${next.label} à ${formatPace(next.pace)} /km` : sec?.label ? '' : `km ${km(distanceAt(plan, runTime), 1)}`;
+  const span = sec ? sec.endTime - sec.startTime : 0;
+  ($('hud-bar') as HTMLElement).style.width = `${Math.round(100 * (sec?.label && span > 0 ? Math.min(1, (runTime - sec.startTime) / span) : songProgress))}%`;
+}
+
+// ---------- Aide ----------
+
+const help = $<HTMLDialogElement>('help');
+$('help-open').addEventListener('click', () => help.showModal());
+$('help-close').addEventListener('click', () => help.close());
+help.addEventListener('click', (ev) => {
+  if (ev.target === help) help.close();
+});
 
 // ---------- Lecteur interne (Navidrome) ----------
 
@@ -1142,6 +1317,7 @@ function renderPlayerRun(snap: PlayerSnapshot): void {
     $('run-km').textContent = runTime >= current.plan.totalTime ? 'Arrivée !' : `km ${km(distanceAt(current.plan, runTime), 1)} · cible ${cadenceAt(current.plan, runTime)} pas/min`;
     showTip(current.plan, runTime);
   }
+  renderHud(entry ? entry.startTime + snap.position : 0, entry ? snap.index : -1, snap.playing, snap.duration > 0 ? snap.position / snap.duration : 0);
   $('run-cad').classList.toggle('silent', !snap.playing);
   if (!seeking) runSeek.value = String(snap.duration > 0 ? Math.round((snap.position / snap.duration) * 1000) : 0);
   for (const row of $('playlist').querySelectorAll<HTMLTableRowElement>('tbody tr')) {
@@ -1183,6 +1359,31 @@ function swapSong(i: number, dir: 1 | -1): void {
   update();
 }
 
+// Astuce du glissement : la première ligne esquisse le geste tant qu'il n'a jamais été fait.
+const SWIPE_KEY = 'runbpm.swipeLearned';
+function swipeLearned(): void {
+  try {
+    localStorage.setItem(SWIPE_KEY, '1');
+  } catch {
+    /* préférence non enregistrée */
+  }
+  $('playlist').classList.remove('hint-swipe');
+}
+try {
+  if (localStorage.getItem(SWIPE_KEY) !== '1') $('playlist').classList.add('hint-swipe');
+} catch {
+  /* préférence indisponible */
+}
+// Pochette introuvable : on la masque (l'événement « error » ne remonte pas, on l'écoute en capture).
+$('playlist').addEventListener(
+  'error',
+  (ev) => {
+    const img = ev.target as HTMLElement;
+    if (img.tagName === 'IMG') img.style.visibility = 'hidden';
+  },
+  true,
+);
+
 // Glisser une ligne de la playlist vers la gauche ou la droite : autre morceau à cette place.
 {
   const tbody = $('playlist').querySelector('tbody')!;
@@ -1202,15 +1403,22 @@ function swapSong(i: number, dir: 1 | -1): void {
       dragging = true;
       start.row.setPointerCapture(ev.pointerId);
     }
-    if (dragging) start.row.style.transform = `translateX(${Math.max(-120, Math.min(120, dx))}px)`;
+    if (dragging) {
+      start.row.style.transform = `translateX(${Math.max(-120, Math.min(120, dx))}px)`;
+      start.row.classList.toggle('swiping', Math.abs(dx) > 70);
+    }
   });
   const end = (ev: PointerEvent) => {
     if (!start || ev.pointerId !== start.id) return;
     const dx = ev.clientX - start.x;
     const row = start.row;
     row.style.transform = '';
+    row.classList.remove('swiping');
     start = undefined;
-    if (dragging && Math.abs(dx) > 70) swapSong(Number(row.dataset.i), dx < 0 ? 1 : -1);
+    if (dragging && Math.abs(dx) > 70) {
+      swipeLearned();
+      swapSong(Number(row.dataset.i), dx < 0 ? 1 : -1);
+    }
     dragging = false;
   };
   tbody.addEventListener('pointerup', end);
@@ -1220,6 +1428,7 @@ function swapSong(i: number, dir: 1 | -1): void {
 $('playlist').addEventListener('click', (ev) => {
   const sw = (ev.target as HTMLElement).closest<HTMLButtonElement>('button.row-swap');
   if (sw) {
+    swipeLearned();
     swapSong(Number(sw.dataset.i), 1);
     return;
   }
@@ -1261,6 +1470,24 @@ try {
   /* pas de réglage mémorisé */
 }
 for (const id of ['m-volume', 'm-overlay', 'm-offset', 'keep-awake']) $(id).addEventListener('input', syncCompanionOptions);
+// Alertes de changement de bloc : préférences de l'appareil.
+for (const id of ['block-alert', 'block-beep']) {
+  const box = $<HTMLInputElement>(id);
+  try {
+    const v = localStorage.getItem(`runbpm.${id}`);
+    if (v !== null) box.checked = v === '1';
+  } catch {
+    /* préférence indisponible */
+  }
+  box.addEventListener('change', () => {
+    try {
+      localStorage.setItem(`runbpm.${id}`, box.checked ? '1' : '0');
+    } catch {
+      /* préférence non enregistrée */
+    }
+    if (box.checked && id === 'block-beep') beep();
+  });
+}
 syncCompanionOptions();
 
 // Barre d'espace = départ / pause (hors champs de saisie).

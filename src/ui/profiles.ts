@@ -45,6 +45,24 @@ function newProfile(name: string): RunnerProfile {
   return { id: `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, name, baseCadence: '', useCalibration: true };
 }
 
+type Calibration = NonNullable<RunnerProfile['calibration']>;
+
+/**
+ * Retire une sortie (par nom de fichier) et ses tronçons du calibrage. Les tronçons sont rangés
+ * dans l'ordre d'import et seuls les plus anciens sont élagués : ceux d'une sortie se retrouvent
+ * en comptant depuis la fin.
+ */
+export function removeActivity(cal: Pick<Calibration, 'activities' | 'segments'>, name: string): boolean {
+  const i = cal.activities.findIndex((a) => a.name === name);
+  if (i < 0) return false;
+  const later = cal.activities.slice(i + 1).reduce((n, a) => n + a.segments, 0);
+  const end = Math.max(0, cal.segments.length - later);
+  const start = Math.max(0, end - cal.activities[i].segments);
+  cal.segments.splice(start, end - start);
+  cal.activities.splice(i, 1);
+  return true;
+}
+
 /** Allures (s/km) du tableau de conversion allure → cadence. */
 const PACE_TABLE = [420, 390, 360, 330, 300, 270, 240, 210];
 const paceLabel = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
@@ -164,14 +182,7 @@ export class ProfilePanel {
     el.calibration.addEventListener('click', (ev) => {
       const btn = ev.target as HTMLElement;
       if (btn.id !== 'calibration-clear') return;
-      confirmClick(btn, 'Confirmer l’effacement', () => {
-        this.current.calibration = undefined;
-        this.message = '';
-        this.persist();
-        this.applyToInputs();
-        this.render();
-        onChange();
-      });
+      confirmClick(btn, 'Confirmer l’effacement', () => this.clearCalibration());
     });
     this.applyToInputs();
     this.render();
@@ -179,6 +190,21 @@ export class ProfilePanel {
 
   get current(): RunnerProfile {
     return this.data.profiles.find((p) => p.id === this.data.current) ?? this.data.profiles[0];
+  }
+
+  /** Le profil courant a-t-il des sorties importées ? */
+  get hasCalibration(): boolean {
+    return !!this.current.calibration;
+  }
+
+  /** Efface le calibrage du profil courant : la cadence revient à l'estimation par la vitesse. */
+  clearCalibration(): void {
+    this.current.calibration = undefined;
+    this.message = '';
+    this.persist();
+    this.applyToInputs();
+    this.render();
+    this.onChange();
   }
 
   get calibrationActive(): boolean {
@@ -251,14 +277,15 @@ export class ProfilePanel {
     const p = this.current;
     const errors: string[] = [];
     const added: string[] = [];
-    const cal = p.calibration ?? { activities: [], segments: [], model: undefined as unknown as CalibrationResult };
+    let replaced = 0;
+    const cal = p.calibration
+      ? { ...p.calibration, activities: [...p.calibration.activities], segments: [...p.calibration.segments] }
+      : { activities: [], segments: [], model: undefined as unknown as CalibrationResult };
     for (const f of files) {
       try {
-        if (cal.activities.some((a) => a.name === f.name)) {
-          errors.push(`${f.name} : déjà utilisée`);
-          continue;
-        }
         const act = readActivity(f.name, new Uint8Array(await f.arrayBuffer()));
+        // Même fichier rechargé : ses anciens tronçons sont remplacés par la nouvelle lecture.
+        if (removeActivity(cal, f.name)) replaced++;
         cal.activities.push({ name: f.name, date: act.date, distanceKm: act.distanceKm, segments: act.segments.length });
         cal.segments.push(
           ...act.segments.map((s) => ({
@@ -284,7 +311,14 @@ export class ProfilePanel {
         errors.push((e as Error).message);
       }
     }
-    this.message = [added.length ? `${added.length} sortie(s) ajoutée(s).` : '', ...errors].filter(Boolean).join(' ');
+    const news = added.length - replaced;
+    this.message = [
+      news > 0 ? `${news} sortie(s) ajoutée(s).` : '',
+      replaced > 0 ? `${replaced} sortie(s) rechargée(s).` : '',
+      ...errors,
+    ]
+      .filter(Boolean)
+      .join(' ');
     this.messageIsError = added.length === 0;
     this.persist();
     this.applyToInputs();

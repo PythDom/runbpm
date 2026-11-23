@@ -3,6 +3,7 @@ import { formatDuration } from '../core/library';
 import {
   formatPaceShort,
   parsePaceInput,
+  paceCategory,
   parseWorkout,
   resolveSteps,
   stepCadence,
@@ -70,6 +71,8 @@ export class WorkoutPanel {
       steps: HTMLElement;
       summary: HTMLElement;
       defaults: HTMLElement;
+      /** Repli du texte de la séance (fermé une fois la séance lue). */
+      edit: HTMLDetailsElement;
     },
     /** Cadence (pas/min) pour une vitesse en km/h, selon le profil du coureur. */
     private readonly cadenceFor: (speedKmh: number) => number,
@@ -86,6 +89,9 @@ export class WorkoutPanel {
     }
     el.text.value = this.state.text;
     this.parse();
+    el.edit.open = !this.parsed;
+    // Texte saisi puis quitté : la séance lue prend la place du texte.
+    el.text.addEventListener('change', () => setTimeout(() => this.parsed && (el.edit.open = false), 400));
     const savedLink = parseCorosLink(this.state.text);
     if (savedLink && !this.state.imported) void this.importLink(savedLink);
     el.defaults.addEventListener('click', (ev) => {
@@ -132,6 +138,7 @@ export class WorkoutPanel {
       if ((ev.target as HTMLElement).closest('#workout-sample')) {
         el.text.value = WORKOUT_SAMPLE;
         this.setText(WORKOUT_SAMPLE);
+        el.edit.open = false;
       }
     });
     el.steps.addEventListener('change', (ev) => {
@@ -208,6 +215,7 @@ export class WorkoutPanel {
       this.state.imported = workout;
       this.error = '';
       this.save();
+      this.el.edit.open = false;
     } catch (e) {
       if (run !== this.fetchRun) return;
       this.error = (e as Error).message;
@@ -307,11 +315,23 @@ export class WorkoutPanel {
       w.totalDuration && Math.abs(total - w.totalDuration) > 30
         ? ` <span class="warn-text">(annoncée : ${formatDuration(w.totalDuration)})</span>`
         : '';
-    this.el.summary.className = 'summary';
+    // Barres des blocs : largeur = durée, hauteur = vitesse, couleur = catégorie d'allure.
+    const speeds = resolved.map((r) => 1000 / r.pace);
+    const vMax = Math.max(...speeds);
+    const vMin = Math.min(...speeds);
+    const bars = resolved
+      .map((r, k) => {
+        const h = vMax === vMin ? 70 : 30 + (70 * (speeds[k] - vMin)) / (vMax - vMin);
+        const cat = r.step.kind === 'walk' ? 'walk' : paceCategory(r.step.kind);
+        return `<span class="wbar cat-${cat}" style="flex-grow:${Math.max(1, r.duration)};height:${h.toFixed(0)}%" title="${esc(r.label)} · ${formatDuration(r.duration)} · ${formatPaceShort(r.pace)} /km"></span>`;
+      })
+      .join('');
+    this.el.summary.className = 'summary workout-hero';
     this.el.summary.innerHTML =
-      `<strong>${esc(w.title)}</strong>${fromLink ? ' <span class="tag">COROS</span>' : ''}<br>${formatDuration(total)}${announced} · ≈ ${(dist / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} km · ` +
-      `${resolved.length} bloc(s)` +
-      (estimated ? '<br><span class="small muted">Blocs sans allure dans la séance (« prop. ») : allure proposée pour leur catégorie, modifiable ci-dessus ou bloc par bloc.</span>' : '');
+      `<div class="hero-title"><strong>${esc(w.title)}</strong>${fromLink ? ' <span class="tag">COROS</span>' : ''}</div>` +
+      `<div class="hero-stats"><span><b>${formatDuration(total)}</b>${announced}</span><span><b>≈ ${(dist / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 2 })}</b> km</span><span><b>${resolved.length}</b> blocs</span></div>` +
+      `<div class="wbars" aria-hidden="true">${bars}</div>` +
+      (estimated ? '<p class="small muted">« prop. » : bloc sans allure dans la séance, allure proposée pour sa catégorie.</p>' : '');
 
     // Un rang par bloc distinct (les répétitions ne sont pas recopiées).
     const first = new Map(resolved.map((r) => [r.step, r]));
@@ -321,7 +341,8 @@ export class WorkoutPanel {
         const target = s.duration !== undefined ? formatDuration(s.duration) : `${((s.distance ?? 0) / 1000).toLocaleString('fr-FR')} km`;
         const cadence = stepCadence(r, this.cadenceFor);
         const range = s.paceLow !== undefined ? `${formatPaceShort(s.paceLow)}–${formatPaceShort(s.paceHigh!)}` : '';
-        return `<tr class="${j === 0 && b.repeat > 1 ? 'rep-start' : ''}">
+        const cat = s.kind === 'walk' ? 'walk' : paceCategory(s.kind);
+        return `<tr class="${j === 0 && b.repeat > 1 ? 'rep-start' : ''} cat-${cat}">
           <td>${j === 0 && b.repeat > 1 ? `<span class="tag">×${b.repeat}</span> ` : b.repeat > 1 ? '<span class="rep-indent"></span>' : ''}${esc(s.name)}</td>
           <td class="num">${target}</td>
           <td class="num"><input class="pace-edit" type="text" inputmode="decimal" data-step="${i}.${j}"

@@ -10,14 +10,15 @@
   </head>
   <body>
     <header class="top">
-      <h1><img class="logo" src="/icon.svg" alt="" />RunBPM <span id="screen-title" class="screen-title"></span></h1>
+      <h1><img class="logo" src="/icon.svg" alt="" />RunBPM <span id="screen-title" class="screen-title"></span>
+        <button type="button" id="help-open" class="help-btn" aria-label="Aide" title="Aide et mode d’emploi">?</button></h1>
       <p class="tagline">Une playlist dont le tempo suit la cadence idéale, pas à pas, sur votre parcours.</p>
     </header>
 
     <main id="pager" class="pager">
       <section class="screen" id="screen-route" data-title="Parcours">
           <div class="card">
-            <h2><span class="step">1</span> Parcours ou séance</h2>
+            <h2>Parcours ou séance</h2>
             <div id="plan-mode" class="seg" role="group" aria-label="Type de sortie">
               <button type="button" data-mode="route" aria-pressed="true">Parcours</button>
               <button type="button" data-mode="workout" aria-pressed="false">Séance d’entraînement</button>
@@ -33,27 +34,32 @@
               <div id="route-summary" class="summary muted">Aucun parcours chargé.</div>
             </div>
             <div id="workout-panel" hidden>
-              <label>Séance : lien de partage COROS, ou texte copié (COROS, Garmin…)
-                <textarea id="workout-text" rows="7" spellcheck="false"
-                  placeholder="https://sharepageeu.coros.com/share/training/program/…&#10;ou : nom du bloc, durée (04:00) ou distance (1.00 km), allure (Pace | 4'30''-5'10''), « Repeat 4 Times »…"></textarea>
-              </label>
-              <div class="row"><button type="button" class="link" id="workout-sample">Exemple : 4 × 4 min / 3 min</button></div>
-              <div id="workout-defaults" class="workout-defaults">
-                <p class="small muted">Allures (min/km) proposées d’après la séance, sinon vos sorties : modifiez-en une pour
-                  adapter tous les blocs de cette catégorie ; la cadence suit votre profil.
-                  <button type="button" class="link" id="workout-defaults-reset" hidden>↺ Valeurs proposées</button></p>
-                <label class="file compact">
-                  <input type="file" id="workout-calib-files" accept=".csv,.fit,.tcx" multiple />
-                  <span>Affiner allure → cadence avec vos sorties (CSV des tours COROS, FIT, TCX)</span>
-                </label>
-                <p id="workout-calib-info" class="small muted"></p>
-                <div class="grid3">
-                  <label>Cible<input type="text" data-default="easy" inputmode="decimal" spellcheck="false" /><span class="small muted" data-cadence="easy"></span></label>
-                  <label>Rapide<input type="text" data-default="fast" inputmode="decimal" spellcheck="false" /><span class="small muted" data-cadence="fast"></span></label>
-                  <label>Lent<input type="text" data-default="slow" inputmode="decimal" spellcheck="false" /><span class="small muted" data-cadence="slow"></span></label>
-                </div>
-              </div>
+              <details id="workout-edit" class="workout-edit" open>
+                <summary>Séance : lien COROS ou texte copié</summary>
+                <textarea id="workout-text" rows="7" spellcheck="false" aria-label="Séance : lien de partage COROS, ou texte copié"
+                  placeholder="https://sharepageeu.coros.com/share/training/program/…&#10;ou le texte de la séance (COROS, Garmin…) : blocs, durées ou distances, allures, « Repeat 4 Times »…"></textarea>
+                <div class="row"><button type="button" class="link" id="workout-sample">Exemple : 4 × 4 min / 3 min</button></div>
+              </details>
               <div id="workout-summary" class="summary muted">Aucune séance.</div>
+              <div id="workout-defaults" class="workout-defaults">
+                <div class="pace-head"><h3>Allures <span class="muted small">min/km</span></h3>
+                  <button type="button" class="link" id="workout-defaults-reset" hidden>↺ Valeurs proposées</button></div>
+                <div class="grid3 pace-pills">
+                  <label class="pill cat-slow">Lent<input type="text" data-default="slow" inputmode="decimal" spellcheck="false" /><span class="small" data-cadence="slow"></span></label>
+                  <label class="pill cat-easy">Cible<input type="text" data-default="easy" inputmode="decimal" spellcheck="false" /><span class="small" data-cadence="easy"></span></label>
+                  <label class="pill cat-fast">Rapide<input type="text" data-default="fast" inputmode="decimal" spellcheck="false" /><span class="small" data-cadence="fast"></span></label>
+                </div>
+                <p class="small muted">Proposées d’après la séance, sinon vos sorties. En changer une adapte tous les blocs de la catégorie.</p>
+                <details class="my-cadence">
+                  <summary>Ma cadence <span id="workout-calib-short" class="muted"></span></summary>
+                  <label class="file compact">
+                    <input type="file" id="workout-calib-files" accept=".csv,.fit,.tcx" multiple />
+                    <span>Importer des sorties (CSV des tours COROS, FIT, TCX)</span>
+                  </label>
+                  <p class="small muted"><span id="workout-calib-info"></span>
+                    <button type="button" class="link danger" id="workout-calib-reset" hidden>Réinitialiser les cadences</button></p>
+                </details>
+              </div>
               <div id="workout-steps"></div>
             </div>
           </div>
@@ -62,7 +68,7 @@
 
       <section class="screen" id="screen-runner" data-title="Allure">
           <div class="card">
-            <h2><span class="step">2</span> Course</h2>
+            <h2>Allure et cadence</h2>
             <div class="grid2">
               <label>Allure cible (min/km)
                 <input type="text" id="pace" value="5:30" inputmode="numeric" pattern="\d{1,2}:\d{2}" />
@@ -106,35 +112,66 @@
       </section>
 
       <section class="screen" id="screen-music" data-title="Musique">
-          <div class="card">
-            <h2><span class="step">3</span> Musique</h2>
-            <label class="file">
-              <input type="file" id="audio-folder" webkitdirectory multiple />
-              <span>Analyser un dossier de musique</span>
-            </label>
-            <div class="row">
-              <label class="file compact">
-                <input type="file" id="audio-files" accept="audio/*,.mp3,.m4a,.ogg,.opus,.flac,.wav" multiple />
-                <span>… ou des fichiers</span>
-              </label>
-              <label class="file compact">
-                <input type="file" id="library-file" accept=".csv,.json,.tsv,.txt" multiple />
-                <span>… ou un CSV/JSON</span>
-              </label>
+          <div class="card" id="source-card">
+            <h2>Source de musique</h2>
+            <div id="service-tiles" class="tiles" role="group" aria-label="Source de musique">
+              <button type="button" data-service="navidrome"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v4H4zm0 5h16v4H4zm0 5h16v4H4z" opacity=".35"/><path d="M6 6.5h2v1H6zm0 5h2v1H6zm0 5h2v1H6z"/></svg><span>Navidrome</span></button>
+              <button type="button" data-service="spotify"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm4.6 14.4a.6.6 0 0 1-.9.2c-2.4-1.5-5.4-1.8-9-1a.6.6 0 1 1-.3-1.2c3.9-.9 7.2-.5 9.9 1.1.3.2.4.6.3.9zm1.2-2.7a.8.8 0 0 1-1 .3c-2.7-1.7-6.9-2.2-10.2-1.2a.8.8 0 1 1-.4-1.5c3.7-1.1 8.3-.6 11.4 1.4.3.2.4.7.2 1zm.1-2.8C14.7 9 9.4 8.8 6.3 9.7a.9.9 0 1 1-.5-1.8c3.5-1.1 9.4-.9 13.1 1.3a.9.9 0 0 1-1 1.7z"/></svg><span>Spotify</span></button>
+              <button type="button" data-service="deezer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 16h4v3H2zm5 0h4v3H7zm5 0h4v3h-4zm5 0h5v3h-5zm-5-4h4v3h-4zm5 0h5v3h-5zm0-4h5v3h-5zm0-4h5v3h-5z"/></svg><span>Deezer</span></button>
+              <button type="button" data-service="none"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h8l5 5v15H6zm7 1.5V8h4.5zM12 11v5.3a2 2 0 1 0 1.3 1.9V13h2.2v-2z"/></svg><span>Fichiers</span></button>
             </div>
-            <label class="check"><input type="checkbox" id="use-tag-bpm" checked /> Utiliser le BPM déjà présent dans les tags (plus rapide)</label>
+            <select id="service" hidden aria-hidden="true" tabindex="-1">
+              <option value="navidrome">Navidrome</option>
+              <option value="spotify">Spotify</option>
+              <option value="deezer">Deezer</option>
+              <option value="none">Fichiers</option>
+            </select>
+            <div id="navidrome-panel"></div>
+            <div id="shared-panel" class="shared-panel"></div>
+            <div id="spotify-panel"></div>
+            <div id="deezer-panel" hidden>
+              <p class="muted small">Deezer ne permet plus aux applications tierces de créer des playlists.
+                RunBPM exporte la liste des morceaux, à importer dans Deezer avec un service de transfert
+                (TuneMyMusic, Soundiiz…). Les morceaux absents de Deezer seront sautés : pendant la course,
+                recalez le métronome avec ◀ ▶.</p>
+            </div>
+            <div id="none-panel" hidden>
+              <p class="muted small">Analysez vos fichiers audio ci-dessous, puis exportez la playlist en M3U pour
+                la lire avec le lecteur de votre choix.</p>
+            </div>
+          </div>
+          <div class="card" id="library-card">
+            <h2>Bibliothèque</h2>
+            <div id="library-summary" class="summary muted">Aucun morceau.</div>
+            <p id="pool-info" class="small muted"></p>
             <div id="analysis" class="analysis" hidden>
               <div class="row"><progress id="analysis-bar" max="1" value="0"></progress><button type="button" id="analysis-stop">Arrêter</button></div>
               <p id="analysis-text" class="small muted"></p>
             </div>
-            <div class="row">
-              <button type="button" class="link" id="library-demo">Bibliothèque de démo</button>
-              <button type="button" class="link danger" id="library-clear">Vider</button>
-            </div>
-            <div id="library-summary" class="summary muted">Aucun morceau.</div>
+            <details id="local-sources">
+              <summary>Ajouter des fichiers audio ou une liste</summary>
+              <label class="file">
+                <input type="file" id="audio-folder" webkitdirectory multiple />
+                <span>Analyser un dossier de musique</span>
+              </label>
+              <div class="row">
+                <label class="file compact">
+                  <input type="file" id="audio-files" accept="audio/*,.mp3,.m4a,.ogg,.opus,.flac,.wav" multiple />
+                  <span>… ou des fichiers</span>
+                </label>
+                <label class="file compact">
+                  <input type="file" id="library-file" accept=".csv,.json,.tsv,.txt" multiple />
+                  <span>… ou un CSV/JSON</span>
+                </label>
+              </div>
+              <div class="row">
+                <button type="button" class="link" id="library-demo">Bibliothèque de démo</button>
+                <button type="button" class="link danger" id="library-clear">Vider</button>
+              </div>
+            </details>
             <details>
               <summary>Options de sélection</summary>
-            <p id="pool-info" class="small muted"></p>
+              <label class="check"><input type="checkbox" id="use-tag-bpm" checked /> Utiliser le BPM déjà présent dans les tags (plus rapide)</label>
               <div class="grid2">
                 <label>Tolérance (±%)
                   <input type="number" id="tolerance" value="3" min="0.5" max="10" step="0.5" />
@@ -155,48 +192,21 @@
             </details>
           </div>
         <details id="library-view" class="card library-view" hidden></details>
-        <button type="button" class="next" data-go="3">Écoute <span aria-hidden="true">→</span></button>
-      </section>
-
-      <section class="screen" id="screen-listen" data-title="Écoute">
-          <div class="card">
-            <h2><span class="step">4</span> Streaming</h2>
-            <label>Playlist à créer sur
-              <select id="service">
-                <option value="navidrome">Navidrome / Subsonic (lecture dans RunBPM)</option>
-                <option value="spotify">Spotify</option>
-                <option value="deezer">Deezer</option>
-                <option value="none">Aucun service (fichiers locaux, M3U)</option>
-              </select>
-            </label>
-            <div id="navidrome-panel"></div>
-            <div id="shared-panel" class="shared-panel"></div>
-            <div id="spotify-panel"></div>
-            <div id="deezer-panel" hidden>
-              <p class="muted small">Deezer ne permet plus aux applications tierces de créer des playlists.
-                RunBPM exporte la liste des morceaux, à importer dans Deezer avec un service de transfert
-                (TuneMyMusic, Soundiiz…).</p>
-              <p class="muted small">Les morceaux absents de Deezer seront sautés : pendant la course, recalez
-                le métronome avec les boutons ◀ ▶.</p>
-            </div>
-            <div id="none-panel" hidden>
-              <p class="muted small">Exportez la playlist en M3U pour la lire avec le lecteur de musique de votre choix.</p>
-            </div>
-          </div>
-        <button type="button" class="next" data-go="4">Playlist <span aria-hidden="true">→</span></button>
+        <button type="button" class="next" data-go="3">Playlist <span aria-hidden="true">→</span></button>
       </section>
 
       <section class="screen" id="screen-playlist" data-title="Playlist">
         <div id="messages" class="messages" aria-live="polite"></div>
         <div id="playlist-empty" class="card empty">
           <h2>Votre playlist apparaîtra ici</h2>
-          <p class="muted">Il faut un parcours, une allure et des morceaux : complétez les étapes marquées d’un point.</p>
+          <p class="muted">Encore quelques étapes :</p>
+          <ul class="checklist"></ul>
         </div>
         <section id="results" class="results" hidden>
         <div class="stats" id="stats"></div>
         <div class="card">
           <div class="card-head">
-            <h2>Profil, cadence et morceaux</h2>
+            <h2>Cadence et morceaux</h2>
             <div class="legend">
               <span id="legend-elev"><i class="sw elev"></i>Altitude</span>
               <span><i class="sw cad"></i>Cadence cible</span>
@@ -215,18 +225,19 @@
               <button type="button" id="create-spotify" class="primary" hidden>Créer la playlist Spotify</button>
               <button type="button" id="create-navidrome" hidden>Créer la playlist dans Navidrome</button>
               <button type="button" id="export-deezer" class="primary" hidden>Exporter pour Deezer</button>
-              <button type="button" id="export-m3u">M3U</button>
-              <button type="button" id="export-csv">CSV</button>
-              <button type="button" id="export-json">JSON</button>
+              <span class="exports small muted">Exporter :
+                <button type="button" class="link" id="export-m3u">M3U</button>
+                <button type="button" class="link" id="export-csv">CSV</button>
+                <button type="button" class="link" id="export-json">JSON</button></span>
             </div>
           </div>
           <p id="service-status" class="small" hidden></p>
-            <p class="small muted">Un morceau ne vous plaît pas ? Glissez sa ligne vers la gauche ou la droite (ou ⇄) pour un autre à la même place ; ⊘ l’exclut des playlists.</p>
+          <p class="small muted swipe-hint">Un morceau ne vous plaît pas ? Glissez sa ligne (ou ⇄) pour un autre à la même place ; ⊘ l’exclut des playlists.</p>
           <div class="table-wrap">
             <table id="playlist">
               <thead>
                 <tr>
-                  <th>#</th><th>Début</th><th>Km</th><th>Morceau</th><th class="num">BPM</th>
+                  <th>#</th><th>Début</th><th>Km</th><th class="cover-col"><span class="sr-only">Pochette</span></th><th>Morceau</th><th class="num">BPM</th>
                   <th class="num">Tempo</th><th class="num">Pas/min</th><th class="num">Cible</th><th><span class="sr-only">Exclure</span></th>
                 </tr>
               </thead>
@@ -249,19 +260,39 @@
             </table>
           </div>
         </details>
-          <button type="button" class="next" data-go="5">Courir <span aria-hidden="true">→</span></button>
+          <button type="button" class="next" data-go="4">Courir <span aria-hidden="true">→</span></button>
         </section>
       </section>
 
       <section class="screen" id="screen-run" data-title="Courir">
         <div id="run-empty" class="card empty">
           <h2>Prêt à courir ?</h2>
-          <p class="muted">Préparez d’abord une playlist : parcours, allure et musique.</p>
-          <button type="button" class="primary" data-go="0">Commencer</button>
+          <p class="muted">Il manque encore :</p>
+          <ul class="checklist"></ul>
+        </div>
+        <div id="run-hud" class="run-hud" hidden>
+          <div class="hud-top"><span id="hud-block" class="hud-block">—</span><span id="hud-left" class="hud-left"></span></div>
+          <div class="hud-pace"><span id="hud-pace" class="num-big">—</span><span class="unit">/km</span></div>
+          <div class="hud-row">
+            <div><span id="hud-cad" class="num-mid">—</span><span class="unit">pas/min</span></div>
+            <div><span id="hud-time" class="num-mid">0:00</span><span class="unit">écoulé</span></div>
+          </div>
+          <div id="hud-song" class="hud-song">—</div>
+          <div id="hud-next" class="hud-next"></div>
+          <div class="hud-progress"><i id="hud-bar"></i></div>
+          <div class="hud-controls">
+            <button type="button" id="hud-prev" aria-label="Morceau précédent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+            <button type="button" id="hud-toggle" class="primary" aria-label="Départ / pause">
+              <svg viewBox="0 0 24 24" aria-hidden="true" class="i-play"><path d="M7 4v16l13-8z"/></svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true" class="i-pause"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg></button>
+            <button type="button" id="hud-next-btn" aria-label="Morceau suivant"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+          </div>
+          <button type="button" id="hud-close" class="hud-close">Réglages et détails</button>
         </div>
         <div class="card run" id="run-card" hidden>
           <div class="card-head">
             <h2>Pendant la course</h2>
+            <button type="button" id="hud-open" class="primary">Mode course plein écran</button>
             <span id="run-sync" class="muted small"></span>
           </div>
           <p class="muted small" id="run-help"></p>
@@ -297,19 +328,67 @@
             <label class="volume" id="offset-row" title="Si les clics semblent en avance ou en retard sur la musique (écouteurs Bluetooth notamment)">Décalage des clics
               <input type="range" id="m-offset" min="-150" max="150" step="5" value="0" /><span id="m-offset-val" class="small muted">0 ms</span></label>
             <label class="check"><input type="checkbox" id="keep-awake" checked /> Garder l’écran allumé</label>
+            <label class="check"><input type="checkbox" id="block-alert" checked /> Vibration au changement de bloc</label>
+            <label class="check"><input type="checkbox" id="block-beep" /> Bip au changement de bloc</label>
           </div>
         </div>
       </section>
     </main>
 
     <nav id="tabbar" class="tabbar" aria-label="Étapes">
-      <button type="button" data-go="0" data-tab="0"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg><span>Parcours</span></button>
+      <button type="button" data-go="0" data-tab="0"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg><span id="tab-plan">Parcours</span></button>
       <button type="button" data-go="1" data-tab="1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8-6.6 1.4-1.4c-.4-.5-.9-1-1.4-1.4L17.6 6A9 9 0 1 0 19 7.4zM12 20a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></svg><span>Allure</span></button>
       <button type="button" data-go="2" data-tab="2"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.6A4 4 0 1 0 14 17V7h4V3h-6z"/></svg><span>Musique</span></button>
-      <button type="button" data-go="3" data-tab="3"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 0 0-9 9v7a2 2 0 0 0 2 2h3v-8H5v-1a7 7 0 0 1 14 0v1h-3v8h3a2 2 0 0 0 2-2v-7a9 9 0 0 0-9-9z"/></svg><span>Écoute</span></button>
-      <button type="button" data-go="4" data-tab="4"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h12v2H3V5zm0 4h12v2H3V9zm0 4h8v2H3v-2zm14-4v7.3a3 3 0 1 0 2 2.7V11h3V9h-5z"/></svg><span>Playlist</span></button>
-      <button type="button" data-go="5" data-tab="5"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.49 5.48c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm-3.6 13.9 1-4.4 2.1 2v6h2v-7.5l-2.1-2 .6-3c1.3 1.5 3.3 2.5 5.5 2.5v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1l-5.2 2.2v4.7h2v-3.4l1.8-.7-1.6 8.1-4.9-1-.4 2 7 1.4z"/></svg><span>Courir</span></button>
+      <button type="button" data-go="3" data-tab="3"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h12v2H3V5zm0 4h12v2H3V9zm0 4h8v2H3v-2zm14-4v7.3a3 3 0 1 0 2 2.7V11h3V9h-5z"/></svg><span>Playlist</span></button>
+      <button type="button" data-go="4" data-tab="4"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.49 5.48c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm-3.6 13.9 1-4.4 2.1 2v6h2v-7.5l-2.1-2 .6-3c1.3 1.5 3.3 2.5 5.5 2.5v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1l-5.2 2.2v4.7h2v-3.4l1.8-.7-1.6 8.1-4.9-1-.4 2 7 1.4z"/></svg><span>Courir</span></button>
     </nav>
+
+    <dialog id="help" class="help" aria-labelledby="help-title">
+      <div class="help-head"><h2 id="help-title">Mode d’emploi</h2><button type="button" id="help-close" aria-label="Fermer">✕</button></div>
+      <div class="help-body">
+        <p><strong>RunBPM</strong> compose une playlist dont le tempo suit la cadence (pas par minute) qui convient
+          à chaque moment de votre sortie : un pas par temps, ou un pas par demi-temps pour les morceaux lents.</p>
+        <h3>En 4 étapes</h3>
+        <ol>
+          <li><strong>Séance ou parcours.</strong> Collez un lien de partage COROS ou le texte d’une séance
+            (blocs, durées, allures), ou chargez un parcours GPX. Ajustez les allures Lent / Cible / Rapide.</li>
+          <li><strong>Allure</strong> (parcours seulement). Allure visée et stratégie : allure constante, ou effort
+            constant (plus lent en montée).</li>
+          <li><strong>Musique.</strong> Choisissez la source : Navidrome (lecture dans RunBPM, tempo ajusté),
+            Spotify, Deezer ou vos fichiers. Importez la bibliothèque : le BPM de chaque morceau est lu dans les
+            tags ou mesuré.</li>
+          <li><strong>Playlist puis Courir.</strong> Vérifiez la courbe, glissez une ligne pour changer de morceau,
+            ⊘ pour l’exclure. Sur l’écran Courir, lancez le mode plein écran.</li>
+        </ol>
+        <h3>Principes</h3>
+        <ul>
+          <li><strong>Cadence selon l’allure.</strong> Plus vous allez vite, plus la cadence monte (quelques pas/min
+            par km/h). Sans données, RunBPM l’estime ; importez les CSV des tours COROS (ou FIT/TCX) dans
+            « Ma cadence » pour la calibrer sur vous.</li>
+          <li><strong>Pente.</strong> Sur un parcours, la cadence reste à peu près stable et la foulée s’adapte ;
+            les règles par pente sont réglables (écran Allure).</li>
+          <li><strong>Choix des morceaux.</strong> Chaque place reçoit un morceau dont le tempo tombe dans la
+            tolérance (±3 % par défaut), tiré au hasard parmi les bons candidats. Les morceaux écoutés ces
+            14 derniers jours passent après les autres. « Autre proposition » refait le tirage.</li>
+          <li><strong>Tempo ajusté</strong> (Navidrome) : le morceau est accéléré ou ralenti de quelques % sans
+            changer la hauteur de voix, et coupé aux changements de bloc d’une séance.</li>
+          <li><strong>Morceaux douteux.</strong> Un BPM mesuré avec peu de confiance est masqué tant que vous ne
+            l’avez pas corrigé dans la Bibliothèque.</li>
+        </ul>
+        <h3>Pendant la course</h3>
+        <ul>
+          <li>Le mode plein écran affiche le bloc en cours, l’allure visée, la cadence et le temps restant ;
+            vibration (et bip en option) à chaque changement de bloc.</li>
+          <li>Avec Spotify ou Deezer, lancez la playlist dans leur application et appuyez sur Départ en même
+            temps ; recalez avec ◀ ▶ si un morceau est sauté.</li>
+          <li>L’écran reste allumé ; la musique continue écran verrouillé dans l’application Android.</li>
+        </ul>
+        <h3>Vos données</h3>
+        <p class="small">Tout est calculé sur l’appareil. Le mot de passe Navidrome n’est jamais conservé (seulement
+          un jeton). La base partagée facultative ne contient que les BPM des morceaux, votre sélection et vos
+          exclusions.</p>
+      </div>
+    </dialog>
 
     <footer class="muted">
       Tout est calculé dans votre navigateur : aucun fichier n’est envoyé sur un serveur.

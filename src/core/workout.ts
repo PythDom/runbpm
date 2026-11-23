@@ -362,6 +362,7 @@ export function workoutPlan(
       pace: s.pace,
       cadence: stepCadence(s, cadenceFor),
       label: s.label,
+      category: paceCategory(s.step.kind),
       startTime: t,
       endTime: t + s.duration,
     });
