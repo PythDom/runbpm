@@ -46,7 +46,8 @@
                   <input type="file" id="workout-calib-files" accept=".csv,.fit,.tcx" multiple />
                   <span>Affiner allure → cadence avec vos sorties (CSV des tours COROS, FIT, TCX)</span>
                 </label>
-                <p id="workout-calib-info" class="small muted"></p>
+                <p class="small muted"><span id="workout-calib-info"></span>
+                  <button type="button" class="link danger" id="workout-calib-reset" hidden>Réinitialiser les cadences</button></p>
                 <div class="grid3">
                   <label>Cible<input type="text" data-default="easy" inputmode="decimal" spellcheck="false" /><span class="small muted" data-cadence="easy"></span></label>
                   <label>Rapide<input type="text" data-default="fast" inputmode="decimal" spellcheck="false" /><span class="small muted" data-cadence="fast"></span></label>

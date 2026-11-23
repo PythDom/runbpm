@@ -227,7 +227,10 @@ ou plusieurs sorties de sa montre (**FIT** ou TCX avec cadence), de préférence
   carrés, avec un rappel doux vers les valeurs par défaut : une sortie plate ne renseigne pas sur la
   pente, les coefficients de pente restent alors proches de 0,6 / 0,3 ;
 - une fois calibré, la cadence au plat X suit l'allure choisie ; les tranches de pente s'appliquent
-  ensuite (les coefficients de pente mesurés sont affichés pour information).
+  ensuite (les coefficients de pente mesurés sont affichés pour information) ;
+- recharger un fichier déjà importé (même nom) remplace ses anciens points ; « Réinitialiser les
+  cadences » (écran Séance) ou « Effacer le calibrage » (profil) oublie toutes les sorties, la cadence
+  revient alors à l’estimation par la vitesse jusqu’au prochain import.
 
 Le lecteur FIT est intégré (sans dépendance) : en-têtes compressés, gros/petit-boutisme, CRC, activités
 autres que la course à pied refusées.

@@ -284,6 +284,15 @@ $<HTMLInputElement>('workout-calib-files').addEventListener('change', async (ev)
   $('workout-calib-info').textContent = `${msg} ${profiles.calibrationSummary() ?? ''}`.trim();
 });
 
+// Réinitialisation : on oublie les sorties importées, la cadence revient à l'estimation par la vitesse.
+$('workout-calib-reset').addEventListener('click', (ev) => {
+  confirmClick(ev.currentTarget as HTMLElement, 'Confirmer : effacer les sorties importées', () => {
+    profiles.clearCalibration();
+    update();
+    $('workout-calib-info').textContent = 'Cadences réinitialisées : rechargez vos CSV pour les recalculer.';
+  });
+});
+
 paceInput.addEventListener('input', () => {
   const pace = parsePace(paceInput.value);
   paceInput.classList.toggle('invalid', pace === undefined);
@@ -803,6 +812,7 @@ function update(extraErrors: string[] = [], extraWarnings: string[] = []): void 
   if (!pace && !workout) errors.push('Allure invalide : utilisez le format min:s, par exemple 5:30.');
   workoutPanel.refresh();
   $('workout-pace-hint').hidden = workoutPanel.mode !== 'workout';
+  $('workout-calib-reset').hidden = !profiles.hasCalibration;
   if (!calibInfoBusy) $('workout-calib-info').textContent = profiles.calibrationSummary() ?? 'Sans sorties importées : cadence estimée d’après la vitesse.';
   $('legend-elev').hidden = !!workout;
   const svc = service();
